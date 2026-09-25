@@ -13,6 +13,7 @@ import { evalSet } from './courses.mjs';
 const {values: a, positionals} = parseArgs({allowPositionals: true, options: {
     set: {type: 'string', default: 'both'},
     rounds: {type: 'string', default: '8'},
+    from: {type: 'string', default: '4'},   // skip the rounds training selected best.json on
     stochastic: {type: 'boolean', default: false},
     escape: {type: 'boolean', default: false},
     card: {type: 'boolean', default: false},
@@ -28,7 +29,7 @@ console.log(`${file}  (iter ${ck.meta.iter}, ${ck.meta.totalSteps} steps)`);
 const SCORE = ['albatross', 'eagle', 'birdie', 'par', 'bogey', 'double', 'triple+'];
 for (const set of a.set == 'both' ? ['classic', 'remix'] : [a.set])
 {
-    const res = await pool.evaluate(evalSet(set, +a.rounds), !a.stochastic, a.escape);
+    const res = await pool.evaluate(evalSet(set, +a.rounds, +a.from), !a.stochastic, a.escape);
     const s = summarise(res);
     const dist = new Array(SCORE.length).fill(0);
     for (const e of res) dist[Math.min(Math.max(e.strokes - e.par + 3, 0), 6)]++;
@@ -37,7 +38,7 @@ for (const set of a.set == 'both' ? ['classic', 'remix'] : [a.set])
         + ` ${s.penalties.toFixed(1)} penalties, ${s.pickups.toFixed(2)} pickups per round`);
     console.log('  ' + SCORE.map((n, i)=> `${n} ${(dist[i]/res.length*100).toFixed(1)}%`).join('  '));
     if (a.card || a.shots)
-        for (const e of res.filter(e => e.round == 0))
+        for (const e of res.filter(e => e.round == +a.from))
         {
             console.log(`  hole ${String(e.hole+1).padStart(2)} par ${e.par}: ${e.strokes}`
                 + (e.penalties ? ` (${e.penalties} pen)` : ''));

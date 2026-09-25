@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Reference scores the RL agent is measured against, on the same eval sets:
-//   naive    - the game's own defaults: the pre-selected club (autoClub) aimed
-//              straight at the pin, asked for exactly the pin distance
+//   naive    - the game's own defaults every shot: the pre-selected club
+//              (autoClub) on the default aim and target (the action 0,0)
 //   scripted - the game's hand-written dev bot (Golf13K/game/tools/sim.mjs):
 //              wind-compensated layups along the centreline and a putt solver
 //              that rolls ~55 trial putts. Its wind is unseeded, so its
@@ -15,13 +15,13 @@ import { GAME_ROOT } from './sim/loader.mjs';
 import { evalSet } from './courses.mjs';
 import { summarise } from './pool.mjs';
 
-const {values: a} = parseArgs({options: {rounds: {type: 'string', default: '4'}}});
-const R = +a.rounds;
+const {values: a} = parseArgs({options: {rounds: {type: 'string', default: '4'}, from: {type: 'string', default: '4'}}});
+const R = +a.rounds, F = +a.from;
 
 function naive(set)
 {
     const env = new GolfEnv();
-    return summarise(evalSet(set, R).map(spec =>
+    return summarise(evalSet(set, R, F).map(spec =>
     {
         env.reset(spec);
         let r;
@@ -38,7 +38,7 @@ function naive(set)
 function scripted(set)
 {
     const res = [];
-    for (let r = 0; r < R; ++r)
+    for (let r = F; r < F + R; ++r)
     {
         const args = set == 'classic' ? [String(CLASSIC_SEED)] : [String(r + 1), '--remix'];
         const out = execFileSync(process.execPath, [join(GAME_ROOT, 'game/tools/sim.mjs'), ...args], {encoding: 'utf8'});

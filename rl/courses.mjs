@@ -23,11 +23,13 @@ export function trainEpisode(rand, classicProb = 0, startProb = 0)
     return ep;
 }
 
-// Full 18-hole rounds. rounds = number of wind draws (classic) or courses (remix).
-export function evalSet(name, rounds)
+// Full 18-hole rounds. rounds = number of wind draws (classic) or courses
+// (remix), starting at round `from`. Training's periodic eval (which picks
+// best.json) uses rounds 0-3, so a final report should start past them.
+export function evalSet(name, rounds, from = 0)
 {
     const eps = [];
-    for (let r = 0; r < rounds; ++r)
+    for (let r = from; r < from + rounds; ++r)
         for (let h = 0; h < 18; ++h)
             eps.push(name == 'classic'
                 ? {seed: CLASSIC_SEED, remix: false, hole: h, rngSeed: 1000*(r+1) + h, round: r}
