@@ -9,6 +9,7 @@
     "test": "node --test \"rl/test/*.test.mjs\"",
     "train": "node rl/train.mjs",
     "eval": "node rl/eval.mjs",
-    "baseline": "node rl/baseline.mjs"
+    "baseline": "node rl/baseline.mjs",
+    "web": "node rl/web/serve.mjs"
   }
 }
