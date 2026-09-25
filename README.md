@@ -10,13 +10,19 @@ A reinforcement learning agent that plays [Sunshine Golf Classic](https://github
 ## Results
 
 <!-- results table: kept in sync with docs/TRAINING.md -->
-Strokes to par per 18-hole round, deterministic policy, swing-meter noise on, held-out courses:
+Strokes to par per 18-hole round (par 73), averaged over 20 rounds per column. Swing-meter noise is on, and every course is held out from training:
 
 | Player | Classic course | Unseen remix courses |
 |---|---|---|
-| Naive (the game's default club, aimed at the pin) | +27.3 | +41.5 |
-| The game's scripted dev bot | −3.5 | −1.0 |
-| **RL agent** | _see TRAINING.md_ | |
+| The game's default shot every time (its club, aim and target) | +7.3 | +12.8 |
+| The game's scripted dev bot (`Golf13K/game/tools/sim.mjs`) | −2.9 | −1.1 |
+| **RL agent** (`models/agent.json`, deterministic + escape rule) | **−9.9** | **−9.4** |
+
+The agent makes birdie on about 58% of holes and bogey or worse on about 4%. It trained for 6M strokes (about 2.3 hours on 16 CPU cores).
+
+![learning curve](docs/img/r4-learning-curve.svg)
+
+It also found something in the game's balance: it plays the **driver for nearly every full shot**, down to 20-yard chips, dialing distance with the meter and holding greens with backspin. The game lets any club hit any distance under its maximum, and a club only picks a launch angle, so the driver with backspin works as a universal club.
 
 ## Setup
 
