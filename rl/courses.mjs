@@ -4,7 +4,7 @@
 // rows re-dealt with freshly rolled land, so the agent never memorises a
 // layout. EVALUATION uses courses it has never trained on: the CLASSIC course
 // (seed 1113, not remix) and remix seeds below TRAIN_SEED_MIN.
-import { CLASSIC_SEED } from './env.mjs';
+import { CLASSIC_SEED } from './obs.mjs';
 
 export const TRAIN_SEED_MIN = 1000, TRAIN_SEED_MAX = 2e6;
 

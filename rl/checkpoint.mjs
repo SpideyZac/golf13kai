@@ -2,7 +2,7 @@
 // version it was trained against, the parameters (base64 float32) and,
 // optionally, the Adam state for resuming.
 import fs from 'node:fs';
-import { OBS_VERSION, OBS_DIM } from './env.mjs';
+import { OBS_VERSION, OBS_DIM } from './obs.mjs';
 import { Model } from './policy.mjs';
 
 const enc = (f32)=> Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength).toString('base64');

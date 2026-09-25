@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Sunshine Golf Classic with the RL agent at the controls. Served by rl/web/serve.mjs;
+     the script list mirrors Golf13K/index.html, plus ai.mjs at the end. -->
+<head>
+<title>Sunshine Golf Classic - RL agent</title>
+<meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<link rel=icon href=data:,><!-- dev only: stops headless Chrome's favicon.ico 404 -->
+</head><body>
+
+<!-- LittleJS Engine -->
+<script src=../../Golf13K/src/engineDebug.js></script>
+<script src=../../Golf13K/src/engineMath.js></script>
+<script src=../../Golf13K/src/engineUtilities.js></script>
+<script src=../../Golf13K/src/engineSettings.js></script>
+<script src=../../Golf13K/src/engineObject.js></script>
+<script src=../../Golf13K/src/engineDraw.js></script>
+<script src=../../Golf13K/src/engineInput.js></script>
+<script src=../../Golf13K/src/engineAudio.js></script>
+<script src=../../Golf13K/src/engineTileLayer.js></script>
+<script src=../../Golf13K/src/engineParticles.js></script>
+<script src=../../Golf13K/src/engineMedals.js></script>
+<!-- engineWebGL.js replaced by glRender.js (Drive13K-style 3D renderer) -->
+<script src=../../Golf13K/src/engine.js></script>
+
+<!-- game scripts -->
+<script src=../../Golf13K/game/course.js></script>
+<script src=../../Golf13K/game/golfSim.js></script>
+<script src=../../Golf13K/game/glRender.js></script>
+<script src=../../Golf13K/game/view3d.js></script>
+<script src=../../Golf13K/game/sfx.js></script>
+<script src=../../Golf13K/game/wavedash.js></script>
+<script src=../../Golf13K/game/gamepad.js></script>
+<script src=../../Golf13K/game/game.js></script>
+<script src=../../Golf13K/game/debugGame.js></script>
+<script src=../../Golf13K/game/hud.js></script>
+<!-- the RL agent: replaces the dev bot behind ?auto=1 -->
+<script type=module src=ai.mjs></script>

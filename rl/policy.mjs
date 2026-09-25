@@ -7,7 +7,7 @@
 //   [14,15]  mu                Gaussian means of (aim, dist)
 //   [16,17]  log std           state dependent, clamped to [LS_MIN, LS_MAX]
 import { MLP, randnFrom } from './nn.mjs';
-import { OBS_DIM, N_CLUBS, N_SPIN } from './env.mjs';
+import { OBS_DIM, N_CLUBS, N_SPIN } from './obs.mjs';
 
 export const HEAD = N_CLUBS + N_SPIN + 4;
 const C0 = 0, S0 = N_CLUBS, MU = N_CLUBS + N_SPIN, LS = MU + 2;
