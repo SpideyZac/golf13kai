@@ -34,6 +34,7 @@ To ship a model to the browser page, copy it to `models/agent.json` (params only
 | `--vf` | 0.5 | Critic gradient scale (separate network) |
 | `--gamma` / `--lambda` | 1 / 0.95 | Undiscounted: the return is minus the score |
 | `--hidden` | 256,128 | Both actor and critic |
+| `--start-prob` | 0.3 | Share of episodes that start from a random playable spot on the hole (exploring starts) instead of the tee |
 | `--classic-prob` | 0 | Share of training episodes on the classic course. It is 0 so classic stays a held-out test. |
 | `--eval-every` / `--eval-rounds` | 10 / 4 | Deterministic 18-hole rounds on each eval set |
 
@@ -52,4 +53,5 @@ Newest first. Scores are strokes to par per 18-hole round.
 |---|---|---|---|---|---|
 | _baseline_ naive | — | — | +27.3 | +41.5 | The game's club, straight at the pin |
 | _baseline_ scripted | — | — | −3.5 | −1.0 | The game's dev bot, `Golf13K/game/tools/sim.mjs` |
+| r2 | v2 | 77 (1.19M) | −6.5 | −4.25 | Tee starts only. Deterministic triple+ on 4–7% of holes, stuck behind trees or walls. Stopped and resumed as r3. |
 | r1 | v1 | 41 (630k) | −5.0 | −4.0 | Stopped early. Deterministic play could loop against a tree it could not see, which motivated obs v2. |
