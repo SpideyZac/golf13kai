@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Evaluate a checkpoint on full 18-hole rounds it never trained on.
 // usage: node rl/eval.mjs runs/<name>/best.json [--set classic|remix|both]
-//        [--rounds 8] [--stochastic] [--card] [--shots]
+//        [--rounds 8] [--stochastic | --escape] [--card] [--shots]
+//   --escape sample instead of the mode after a stuck shot (see isStuck)
 //   --card   print the hole-by-hole scorecard of the first round
 //   --shots  also print every shot of that round
 import { parseArgs } from 'node:util';
@@ -13,11 +14,12 @@ const {values: a, positionals} = parseArgs({allowPositionals: true, options: {
     set: {type: 'string', default: 'both'},
     rounds: {type: 'string', default: '8'},
     stochastic: {type: 'boolean', default: false},
+    escape: {type: 'boolean', default: false},
     card: {type: 'boolean', default: false},
     shots: {type: 'boolean', default: false},
     workers: {type: 'string'},
 }});
-const file = positionals[0] ?? 'runs/r1/best.json';
+const file = positionals[0] ?? 'models/agent.json';
 const ck = loadCheckpoint(file);
 const pool = new Pool({workers: a.workers && +a.workers, arch: ck.arch});
 pool.params.set(ck.params);
@@ -26,7 +28,7 @@ console.log(`${file}  (iter ${ck.meta.iter}, ${ck.meta.totalSteps} steps)`);
 const SCORE = ['albatross', 'eagle', 'birdie', 'par', 'bogey', 'double', 'triple+'];
 for (const set of a.set == 'both' ? ['classic', 'remix'] : [a.set])
 {
-    const res = await pool.evaluate(evalSet(set, +a.rounds), !a.stochastic);
+    const res = await pool.evaluate(evalSet(set, +a.rounds), !a.stochastic, a.escape);
     const s = summarise(res);
     const dist = new Array(SCORE.length).fill(0);
     for (const e of res) dist[Math.min(Math.max(e.strokes - e.par + 3, 0), 6)]++;

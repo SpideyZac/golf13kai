@@ -70,7 +70,7 @@ if (!resume || !fs.existsSync(logFile))
 fs.writeFileSync(join(dir, 'config.json'), JSON.stringify({args: a, arch, hp}, null, 2));
 console.log(`run ${a.name}: ${pool.size} workers, ${N} params, ${num('steps')*pool.size} steps/iter`);
 
-let totalSteps = 0;
+let totalSteps = resume?.meta.totalSteps ?? 0;
 const recent = [];
 const ckptMeta = (iter, extra = {})=> ({iter, totalSteps, bestEval, ...extra});
 for (let it = startIter; it < iters; ++it)

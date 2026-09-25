@@ -4,7 +4,7 @@
 // buffer the trainer writes between rounds; gradients go to this worker's own
 // shared buffer for the trainer to sum.
 import { parentPort, workerData } from 'node:worker_threads';
-import { GolfEnv, OBS_DIM } from './env.mjs';
+import { GolfEnv, OBS_DIM, isStuck } from './env.mjs';
 import { Model, ppoRowGrad, HEAD } from './policy.mjs';
 import { randnFrom } from './nn.mjs';
 import { mulberry32 } from './sim/loader.mjs';
@@ -32,13 +32,15 @@ function ensure(k)
 }
 
 // Play one episode, storing every step from index n on. Returns the episode summary.
-function playEpisode(spec, deterministic, store, gamma, lambda)
+function playEpisode(spec, deterministic, store, gamma, lambda, escape = false)
 {
     let obs = env.reset(spec);
     const start = n, rewards = [];
     for (;;)
     {
-        const a = model.act(obs, rand, randn, deterministic);
+        const last = env.log.at(-1);
+        const det = deterministic && !(escape && last && isStuck(env.prev, last.club == 'PT'));
+        const a = model.act(obs, rand, randn, det);
         if (store)
         {
             ensure(n+1);
@@ -131,9 +133,9 @@ const handlers =
         return {B, pl, vl, ent, kl, clipN};
     },
 
-    eval({episodes, deterministic})
+    eval({episodes, deterministic, escape})
     {
-        return episodes.map(spec => playEpisode(spec, deterministic, false));
+        return episodes.map(spec => playEpisode(spec, deterministic, false, 1, 1, escape));
     },
 };
 

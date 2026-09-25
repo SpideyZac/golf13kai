@@ -48,11 +48,11 @@ export class Pool
     all(type, args) { return Promise.all(this.workers.map((_, i)=> this.call(i, type, args))); }
 
     // Spread episode specs over the workers; results come back in spec order.
-    async evaluate(episodes, deterministic = true)
+    async evaluate(episodes, deterministic = true, escape = false)
     {
         const k = this.size, chunks = Array.from({length: k}, ()=> []);
         episodes.forEach((e, i)=> chunks[i % k].push(e));
-        const res = await Promise.all(chunks.map((c, i)=> this.call(i, 'eval', {episodes: c, deterministic})));
+        const res = await Promise.all(chunks.map((c, i)=> this.call(i, 'eval', {episodes: c, deterministic, escape})));
         const out = new Array(episodes.length);
         res.forEach((r, i)=> r.forEach((e, j)=> { out[j*k + i] = e; }));
         return out;
