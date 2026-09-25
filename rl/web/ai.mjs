@@ -7,8 +7,9 @@
 //
 // Query params: ?model=<url of a checkpoint json> (default ../../models/agent.json)
 import { API_BODY } from '../sim/api.mjs';
-import { Observer, OBS_VERSION, OBS_DIM, CLUB_NAMES } from '../obs.mjs';
+import { Observer, OBS_VERSION, OBS_DIM, CLUB_NAMES, isStuck } from '../obs.mjs';
 import { Model } from '../policy.mjs';
+import { randnFrom } from '../nn.mjs';
 
 // the game's globals, through the same accessor list the Node loader uses
 const G = new Function(API_BODY)();
@@ -39,7 +40,8 @@ window.showMsg = (t)=>
     showMsg0(t);
 };
 
-let curHole = null, prev, lastStart, shot = null;
+let curHole = null, prev, lastStart, shot = null, lastPutt = false;
+const randn = randnFrom(Math.random);
 window.botSwing = function aiSwing()
 {
     if (!model) return;
@@ -56,13 +58,15 @@ window.botSwing = function aiSwing()
         if (lastStart)
             prev = {moved: Math.hypot(ball.x - lastStart.x, ball.z - lastStart.z), ...flags};
         const obs = observer.observe({strokes, prev, maxOver: 5});
-        const a = model.act(obs, Math.random, ()=> 0, true);
+        // the mode, unless the last full swing got nowhere (the escape rule)
+        const stuck = lastStart && isStuck(prev, lastPutt);
+        const a = model.act(obs, Math.random, randn, !stuck);
         shot = observer.decode(a);
         clubI = shot.club;
         spinMode = shot.spin;
         aimYaw = shot.yaw;
         setTarget(shot.want);
-        console.log(`AI ${CLUB_NAMES[shot.club]} ${['back', 'flat', 'top'][shot.spin+1]}`
+        console.log(`AI${stuck ? ' (escape)' : ''} ${CLUB_NAMES[shot.club]} ${['back', 'flat', 'top'][shot.spin+1]}`
             + ` aim ${((shot.yaw - observer.pinDir())*180/Math.PI).toFixed(1)}deg off the pin,`
             + ` asks ${shot.want.toFixed(1)}yd of ${ballToPin().toFixed(1)}`);
         botLined = 1;
@@ -75,6 +79,7 @@ window.botSwing = function aiSwing()
     botLined = 0;
     ++strokes;
     lastStart = {x: ball.x, z: ball.z};
+    lastPutt = shot.club == CLUB_PUTTER;
     flags.tree = flags.hazard = 0;
     const putt = shot.club == CLUB_PUTTER;
     // the meter noise the agent trained with (rl/env.mjs DEFAULT_ENV)
