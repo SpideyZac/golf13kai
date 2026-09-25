@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" font-family="system-ui,sans-serif" role="img" aria-label="Learning curve">
+<style>
+  .bg{fill:#fcfcfb}.grid{stroke:#e4e3dc;stroke-width:1}.tick,.lab{fill:#6b6a63;font-size:12px}.ttl{fill:#1a1a19;font-size:15px;font-weight:600}
+  .c{stroke:#2a78d6}.r{stroke:#eb6834}.s{stroke-width:1.5;stroke-dasharray:4 4}.dl{fill:#1a1a19;font-size:12px}
+  @media (prefers-color-scheme: dark){.bg{fill:#1a1a19}.grid{stroke:#3a3a37}.tick,.lab{fill:#c3c2b7}.ttl,.dl{fill:#fff}.c{stroke:#3987e5}.r{stroke:#d95926}}
+</style>
+<rect class="bg" width="720" height="360" rx="8"/>
+<text class="ttl" x="56" y="24">Held-out eval, strokes to par per 18-hole round (up is better)</text>
+<text class="tick" x="56" y="334" text-anchor="middle">0</text><text class="tick" x="194.5" y="334" text-anchor="middle">100</text><text class="tick" x="333" y="334" text-anchor="middle">200</text><text class="tick" x="471.5" y="334" text-anchor="middle">300</text><text class="tick" x="610" y="334" text-anchor="middle">400</text>
+<line class="grid" x1="56" x2="610" y1="NaN" y2="NaN" style="stroke-width:1.5"/>
+<path class="c s" fill="none" d="M56,NaNH610"/><path class="r s" fill="none" d="M56,NaNH610"/>
+<path class="c" fill="none" stroke-width="2" stroke-linejoin="round" d="M69.8,NaNL83.7,NaNL97.5,NaNL111.4,NaNL125.3,NaNL139.1,NaNL152.9,NaNL166.8,NaNL180.7,NaNL194.5,NaNL208.4,NaNL222.2,NaNL236.1,NaNL249.9,NaNL263.8,NaNL277.6,NaNL291.4,NaNL305.3,NaNL319.1,NaNL333.0,NaNL346.9,NaNL360.7,NaNL374.5,NaNL388.4,NaNL402.3,NaNL416.1,NaNL430.0,NaNL443.8,NaNL457.6,NaNL471.5,NaNL485.4,NaNL499.2,NaNL513.0,NaNL526.9,NaNL540.8,NaNL554.6,NaNL568.5,NaNL582.3,NaNL596.1,NaNL610.0,NaN"/>
+<path class="r" fill="none" stroke-width="2" stroke-linejoin="round" d="M69.8,NaNL83.7,NaNL97.5,NaNL111.4,NaNL125.3,NaNL139.1,NaNL152.9,NaNL166.8,NaNL180.7,NaNL194.5,NaNL208.4,NaNL222.2,NaNL236.1,NaNL249.9,NaNL263.8,NaNL277.6,NaNL291.4,NaNL305.3,NaNL319.1,NaNL333.0,NaNL346.9,NaNL360.7,NaNL374.5,NaNL388.4,NaNL402.3,NaNL416.1,NaNL430.0,NaNL443.8,NaNL457.6,NaNL471.5,NaNL485.4,NaNL499.2,NaNL513.0,NaNL526.9,NaNL540.8,NaNL554.6,NaNL568.5,NaNL582.3,NaNL596.1,NaNL610.0,NaN"/>
+<text class="dl" x="618" y="NaN">classic -10.75</text>
+<text class="dl" x="618" y="NaN">remix NaN</text>
+<text class="lab" x="333" y="352" text-anchor="middle">training iteration (~15k strokes each) · dashed: scripted bot</text>
+</svg>

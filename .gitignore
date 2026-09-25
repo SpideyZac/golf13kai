@@ -3,3 +3,6 @@ runs/*
 !runs/.gitkeep
 *.log
 runs_*.lo
+golfsim/target/
+__pycache__/
+*.egg-info/

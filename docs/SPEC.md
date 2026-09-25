@@ -1,6 +1,6 @@
 # GolfEnv specification (observation/action v3)
 
-The environment contract between the game and the agent. `rl/env.mjs` implements the episode, and `rl/obs.mjs` implements the observation and action decoding, shared with the browser agent.
+The environment contract between the game and the agent. `rl/env.mjs` implements the episode, and `rl/obs.mjs` implements the observation and action decoding, shared with the browser agent. `golfsim/` is the same contract in Rust, for training (see Physics).
 
 Any change to what `observe()` writes, or to what `decode()` means, must bump `OBS_VERSION`. Checkpoints record the version they were trained on and refuse to load against another.
 
@@ -29,7 +29,12 @@ The rules follow `Golf13K/game/game.js`:
 
 ## Physics
 
-The environment runs the game's own `src/engineMath.js`, `game/course.js` and `game/golfSim.js`, loaded from the submodule by `rl/sim/loader.mjs`. Each env instance gets its own closure, with its own `hole`, `ball` and `Math`, so instances can be interleaved safely. Nothing in the physics is reimplemented.
+There are two implementations of this contract, and they agree bit for bit:
+
+- **JS** (`rl/env.mjs`, `rl/obs.mjs`): runs the game's own `src/engineMath.js`, `game/course.js` and `game/golfSim.js`, loaded from the submodule by `rl/sim/loader.mjs`. Each env instance gets its own closure, with its own `hole`, `ball` and `Math`. The browser agent uses `rl/obs.mjs` against the live game.
+- **Rust** (`golfsim/`): a line-by-line port of those files and of `rl/obs.mjs`/`rl/env.mjs`, which the Python trainer runs. Its math goes through `golfsim/src/jsmath.rs`, which reproduces V8's `Math.sin`, `cos`, `tanh`, `log`, `log1p`, `exp`, `atan2` and `hypot` exactly (fdlibm and V8's hypot algorithm). Every RandomGenerator draw happens in the JS order, and float operations keep the JS operand order.
+
+`rl/test/parity.test.mjs` plays the same holes and swings through both and compares every hole layout, ball position and observation float with `===`. Any change to the game (a submodule bump) or to either side has to keep it passing.
 
 ## The reference shot
 

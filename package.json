@@ -1,12 +1,13 @@
 {
   "name": "golf13kai",
   "version": "0.1.0",
-  "description": "Reinforcement learning agent for Sunshine Golf Classic (Golf13K), in dependency-free Node.js",
+  "description": "Reinforcement learning agent for Sunshine Golf Classic: a bit-exact Rust port of the physics, PyTorch training, and the browser agent",
   "type": "module",
   "private": true,
   "engines": { "node": ">=20" },
   "scripts": {
     "test": "node --test \"rl/test/*.test.mjs\"",
+    "build:sim": "cargo build --release --manifest-path golfsim/Cargo.toml",
     "train": "node rl/train.mjs",
     "eval": "node rl/eval.mjs",
     "baseline": "node rl/baseline.mjs",

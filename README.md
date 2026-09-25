@@ -2,10 +2,10 @@
 
 A reinforcement learning agent that plays [Sunshine Golf Classic](https://github.com/KilledByAPixel/Golf13K) (Frank Force, JS13K 2026). It learns to pick a club, a spin, an aim line and a distance, and it holes out on courses it has never seen.
 
-- **Pure Node.js, zero dependencies.** PPO, the MLP and backprop are hand-written, and the gradients are checked by finite differences in `npm test`.
-- **The game's own physics.** The game's `golfSim.js` and `course.js` load straight from the `Golf13K` submodule, so the agent plays exactly what the browser runs.
+- **The game's physics, in Rust, bit for bit.** `golfsim/` ports the game's `course.js` and `golfSim.js` (and the observation) to Rust, down to V8's own `sin`, `log` and `hypot`. A parity test plays the same holes in the real JS game and in Rust and requires every ball position and every observation float to be identical, and it is: 1500 holes, 6145 strokes. About 25× faster than the JS per stroke, and it runs on every core.
+- **PyTorch training, GPU ready.** `py/golfrl` is PPO on the GPU (or CPU), stepping 512 Rust envs in parallel through a C ABI. A 400-iteration run (6.5M strokes) takes 12 minutes on a 16-core CPU with no GPU, against 2.3 hours for the original pure-Node trainer, and matches its agent.
 - **Generalises.** It trains on endless procedural remix courses and is tested on the classic course and remix seeds it never saw.
-- **Plays in the browser.** `npm run web`, then open `http://localhost:8013/rl/web/?auto=1` and watch it play the real game.
+- **Plays in the browser.** Checkpoints are saved in the JS format, so the browser agent loads them unchanged: `npm run build:web` makes `build/index.html`, one file that plays the real game from disk.
 
 ## Results
 
@@ -18,7 +18,7 @@ Strokes to par per 18-hole round (par 73), averaged over 20 rounds per column. S
 | The game's scripted dev bot (`Golf13K/game/tools/sim.mjs`) | −2.9 | −1.1 |
 | **RL agent** (`models/agent.json`, deterministic + escape rule) | **−9.9** | **−9.4** |
 
-The agent makes birdie on about 58% of holes and bogey or worse on about 4%. It trained for 6M strokes (about 2.3 hours on 16 CPU cores).
+The agent makes birdie on about 58% of holes and bogey or worse on about 4%. It trained for 6M strokes (about 2.3 hours on 16 CPU cores, with the original Node trainer; the Python trainer reproduces it in 12 minutes on the same CPU, see py1 in docs/TRAINING.md).
 
 ![learning curve](docs/img/r4-learning-curve.svg)
 
@@ -28,15 +28,21 @@ It also found something in the game's balance: it plays the **driver for nearly 
 
 ```sh
 git clone --recursive <this repo>        # or: git submodule update --init
-npm test
-npm run baseline
-npm run train -- --name myrun            # uses every core; ~18s per iteration on 16
-npm run eval -- runs/myrun/best.json --card
-npm run web                              # watch models/agent.json play
-npm run build:web                        # the same as one html file: build/index.html
+npm run build:sim                        # the Rust env (needs Rust: https://rustup.rs)
+pip install -r py/requirements.txt       # PyTorch + numpy; the CUDA build of torch for a GPU
+npm test                                 # includes the Rust-vs-JS parity test
+
+cd py
+python -m golfrl.selftest                # PyTorch network == the browser's network
+python -m golfrl.train --name myrun      # uses the GPU if there is one
+python -m golfrl.evaluate ../runs/myrun/best.json --rounds 20 --escape
+cd ..
+cp runs/myrun/best.json models/agent.json
+npm run build:web                        # build/index.html: the agent playing the real game, one file
+npm run web                              # or watch it at http://localhost:8013/rl/web/?auto=1
 ```
 
-This needs Node ≥ 20. Nothing to install.
+Node ≥ 20, Rust (stable) and Python ≥ 3.9 with PyTorch ≥ 2.1. See [docs/TRAINING.md](docs/TRAINING.md) for GPU notes and the flags.
 
 ## How it works
 
@@ -57,13 +63,16 @@ See [docs/SPEC.md](docs/SPEC.md) for the environment contract, [docs/DESIGN.md](
 
 ```
 Golf13K/        the game (submodule, untouched)
+golfsim/        the game's physics + the env in Rust (bit-exact), C ABI, parity CLI
+py/golfrl/      PyTorch: PPO trainer, evaluation, the ctypes env, checkpoint I/O
 rl/sim/         loads the game's physics headless; the shared accessor list
 rl/obs.mjs      observation + action decoding (Node and browser)
-rl/env.mjs      GolfEnv (episode = hole)
+rl/env.mjs      GolfEnv (episode = hole), the reference the Rust port is tested against
 rl/nn.mjs       MLP, Adam
 rl/policy.mjs   actor/critic, hybrid action distribution, PPO gradient
-rl/train.mjs    PPO trainer over worker threads (rl/worker.mjs, rl/pool.mjs)
+rl/train.mjs    the original pure-Node PPO trainer (rl/worker.mjs, rl/pool.mjs)
 rl/eval.mjs     held-out evaluation; rl/baseline.mjs reference bots
+rl/test/        gradient checks, env contract, Rust parity
 rl/web/         the agent at the controls of the browser game
 models/         the shipped agent
 docs/           spec, design, training
