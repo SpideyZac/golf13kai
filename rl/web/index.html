@@ -1,6 +1,8 @@
-<!doctype html>
 <!-- Sunshine Golf Classic with the RL agent at the controls. Served by rl/web/serve.mjs;
-     the script list mirrors Golf13K/index.html, plus ai.mjs at the end. -->
+     the script list mirrors Golf13K/index.html, plus ai.mjs at the end.
+     NO DOCTYPE, like the game's own page: engine.js sizes the canvas from
+     body.clientWidth/Height, which is the viewport only in quirks mode. With a
+     doctype body's height reads 0 and the canvas is invisible (black screen). -->
 <head>
 <title>Sunshine Golf Classic - RL agent</title>
 <meta charset=utf-8>
