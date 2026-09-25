@@ -74,14 +74,14 @@ let perm = null, mbBuf = null, dOut = null, dV = null;
 
 const handlers =
 {
-    rollout({steps, classicProb, gamma, lambda})
+    rollout({steps, classicProb, startProb, gamma, lambda})
     {
         n = 0;
         ensure(steps + 64);
         const eps = [];
         while (n < steps)
         {
-            const e = playEpisode(trainEpisode(rand, classicProb), false, true, gamma, lambda);
+            const e = playEpisode(trainEpisode(rand, classicProb, startProb), false, true, gamma, lambda);
             delete e.shots;
             eps.push(e);
         }

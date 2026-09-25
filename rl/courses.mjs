@@ -8,15 +8,19 @@ import { CLASSIC_SEED } from './obs.mjs';
 
 export const TRAIN_SEED_MIN = 1000, TRAIN_SEED_MAX = 2e6;
 
-// rand: () => [0,1). classicProb lets a run also practise the classic course.
-export function trainEpisode(rand, classicProb = 0)
+// rand: () => [0,1). classicProb lets a run also practise the classic course;
+// startProb is the share of episodes that start from a random spot on the
+// hole rather than the tee (see GolfEnv.placeBall).
+export function trainEpisode(rand, classicProb = 0, startProb = 0)
 {
     const classic = rand() < classicProb;
     let seed = CLASSIC_SEED;
     if (!classic)
         do seed = TRAIN_SEED_MIN + Math.floor(rand()*(TRAIN_SEED_MAX - TRAIN_SEED_MIN));
         while (seed == CLASSIC_SEED);
-    return {seed, remix: !classic, hole: Math.floor(rand()*18), rngSeed: 1 + Math.floor(rand()*2**31)};
+    const ep = {seed, remix: !classic, hole: Math.floor(rand()*18), rngSeed: 1 + Math.floor(rand()*2**31)};
+    if (rand() < startProb) ep.start = {u: rand(), v: rand()};
+    return ep;
 }
 
 // Full 18-hole rounds. rounds = number of wind draws (classic) or courses (remix).

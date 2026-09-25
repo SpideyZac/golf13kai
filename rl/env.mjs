@@ -25,8 +25,10 @@ export class GolfEnv
         this.observer = new Observer(G);
     }
 
-    // opts: {seed, remix, hole (0-17), rngSeed}
-    reset({seed = 1113, remix = false, hole = 0, rngSeed = 1} = {})
+    // opts: {seed, remix, hole (0-17), rngSeed, start}
+    // start (training only): {u, v} in [0,1) drops the ball at a random spot
+    // of the hole instead of the tee - u along the centreline, v across it
+    reset({seed = 1113, remix = false, hole = 0, rngSeed = 1, start = null} = {})
     {
         const G = this.G;
         this.M.random = mulberry32(rngSeed);
@@ -37,13 +39,33 @@ export class GolfEnv
         this.seed = seed; this.remix = remix; this.holeIndex = hole;
         const b = G.ball;
         b.x = b.z = b.vx = b.vy = b.vz = 0;
-        b.y = G.groundAt(0, 0).h;
+        if (start) this.placeBall(start);
+        b.y = G.groundAt(b.x, b.z).h;
         G.ballEvent = 0;
         this.strokes = 0; this.penalties = 0; this.done = false;
         this.log = [];
         this.prev = {moved: 0, tree: 0, hazard: 0};
         this.observer.newHole();
         return this.observe();
+    }
+
+    // EXPLORING STARTS: anywhere in the corridor that is not water or OB -
+    // rough under the trees, sand, a hillside, the green. Trouble is rare from
+    // the tee, so without these the agent never practises getting out of it.
+    // The lateral offset shrinks toward the centreline until the spot is legal.
+    placeBall({u, v})
+    {
+        const G = this.G, h = this.h, b = G.ball;
+        const along = u*h.len*.97;
+        const p = G.pathPointAt(along), q = G.pathPointAt(Math.min(along + 2, h.len));
+        const tl = Math.hypot(q.x-p.x, q.z-p.z) || 1;
+        const nx = (q.z-p.z)/tl, nz = -(q.x-p.x)/tl;
+        for (let lat = (2*v - 1)*60; ; lat *= .6)
+        {
+            const x = p.x + nx*lat, z = p.z + nz*lat, s = G.surfaceAt(x, z);
+            if (s < G.SURF_WATER) { b.x = x; b.z = z; return; }
+            if (Math.abs(lat) < 1) return; // centreline is wet (a river): keep the tee
+        }
     }
 
     pinDist() { return this.observer.pinDist(); }

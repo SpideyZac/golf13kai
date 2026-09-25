@@ -3,7 +3,7 @@
 // gradient shards; this thread sums them, clips, and steps Adam on the shared
 // parameters. See docs/TRAINING.md.
 //
-// usage: node rl/train.mjs [--name run] [--iters 300] [--workers N] [--steps 1024]
+// usage: node rl/train.mjs [--name run] [--start-prob 0.3] [--iters 300] [--workers N] [--steps 1024]
 //        [--lr 3e-4] [--epochs 4] [--mb 4] [--resume runs/x/last.json] [--eval-every 10]
 import fs from 'node:fs';
 import { join } from 'node:path';
@@ -33,6 +33,7 @@ const {values: a} = parseArgs({options: {
     gamma: {type: 'string', default: '1'},
     lambda: {type: 'string', default: '0.95'},
     'classic-prob': {type: 'string', default: '0'},
+    'start-prob': {type: 'string', default: '0.3'}, // exploring starts (random spot on the hole)
     hidden: {type: 'string', default: DEFAULT_ARCH.hidden.join(',')},
     resume: {type: 'string'},
     'eval-every': {type: 'string', default: '10'},
@@ -77,7 +78,7 @@ for (let it = startIter; it < iters; ++it)
     const t0 = performance.now();
     const frac = it/Math.max(1, iters-1);
     adam.lr = num('lr')*(1 - frac*(1 - num('lr-final')));
-    const ro = await pool.all('rollout', {steps: num('steps'), classicProb: num('classic-prob'),
+    const ro = await pool.all('rollout', {steps: num('steps'), classicProb: num('classic-prob'), startProb: num('start-prob'),
         gamma: num('gamma'), lambda: num('lambda')});
     let n = 0, s = 0, s2 = 0;
     for (const r of ro) { n += r.n; s += r.advSum; s2 += r.advSq; recent.push(...r.eps); }

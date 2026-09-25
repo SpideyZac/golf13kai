@@ -60,3 +60,18 @@ test('training never samples an eval course', ()=>
         assert.ok(e.remix && e.seed >= TRAIN_SEED_MIN && e.hole >= 0 && e.hole < 18);
     }
 });
+
+test('exploring starts land on playable ground away from the tee', ()=>
+{
+    const env = new GolfEnv(), rand = mulberry32(9);
+    let away = 0;
+    for (let i = 0; i < 60; ++i)
+    {
+        const spec = {...trainEpisode(rand), start: {u: rand(), v: rand()}};
+        env.reset(spec);
+        const b = env.G.ball, s = env.G.surfaceAt(b.x, b.z);
+        assert.ok(s < env.G.SURF_WATER, `landed on surface ${s}`);
+        away += Math.hypot(b.x, b.z) > 20;
+    }
+    assert.ok(away > 45);
+});
