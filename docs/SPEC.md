@@ -1,6 +1,6 @@
-# GolfEnv specification (observation v1)
+# GolfEnv specification (observation v2)
 
-The environment contract between the game and the agent. `rl/env.mjs` implements it. Any change to the observation layout must bump `OBS_VERSION`, because checkpoints record the version they were trained on and refuse to load against another.
+The environment contract between the game and the agent. `rl/env.mjs` implements it. v2 added the last-shot and line-of-fire blocks: v1 agents looped forever against a tree they could not see at grid resolution. Any change to the observation layout must bump `OBS_VERSION`, because checkpoints record the version they were trained on and refuse to load against another.
 
 ## Episodes
 
@@ -38,7 +38,7 @@ Decoding follows the game's meter: `power = want / (carry(club) * lieMul(club))`
 
 These match the error the game's scripted dev bot is given, so their scores can be compared.
 
-## Observation (1348 floats)
+## Observation (1377 floats)
 
 Everything spatial is in the **pin frame**: `+fwd` points from the ball to the pin, and `+lat` is to the right of that line, the side a positive `aim` moves the shot toward.
 
@@ -54,6 +54,8 @@ Everything spatial is in the **pin frame**: `+fwd` points from the ball to the p
 | Distance | 3 | d/300, log1p(d)/6, whether d < 45 |
 | Game's club | 11 | One-hot `autoClub()`, the club the game pre-selects |
 | Path progress | 3 | Distance off the centreline /60, fraction along, yards remaining /300 |
+| Last shot | 3 | log1p(yards the last shot moved)/6, whether it hit a tree, whether it found water or OB. All 0 on the tee. |
+| Line of fire | 26 | 13 rays at aim offsets −60°…+60°, every 10°. Each gives `1 − dist/80` to the first tree canopy on the line (0 = clear for 80 yards), and the steepest rise `tanh(2·Δh/r)` over r ∈ {4, 8, 14, 22, 32, 45, 60} |
 | Putt preview | 8 | If d < 45: the game's putt line aimed at the pin with pace d and 1.3d. For each: stop fwd error, stop lat error, closest-pass lateral miss (all ÷ d, tanh), and whether it drops. |
 | Flight preview | 5 | For the game's club aimed at the pin with power for d, in still air: landing fwd error, landing lat, whether the flight clips a rising face, and whether it lands in water/OB or sand |
 | Centreline ahead | 20 | Path points 30…300 yards further along, as (fwd, lat)/300 |

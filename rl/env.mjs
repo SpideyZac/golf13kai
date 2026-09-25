@@ -8,7 +8,7 @@
 // the swing itself goes through the game's launchBall with meter-timing noise.
 import { loadGame, mulberry32 } from './sim/loader.mjs';
 
-export const OBS_VERSION = 1;
+export const OBS_VERSION = 2;
 export const CLASSIC_SEED = 1113;
 export const N_CLUBS = 11, N_SPIN = 3;
 
@@ -28,9 +28,15 @@ const GA_LAT = [-.4, -.25, -.12, -.05, 0, .05, .12, .25, .4];
 const GB_FWD = Array.from({length: 15}, (_, i)=> 20 + 20*i);
 const GB_LAT = [-50, -30, -15, 0, 15, 30, 50];
 const LOOK = Array.from({length: 10}, (_, i)=> 30 + 30*i);
+// Line of fire: rays at these aim offsets (radians, like the aim action) out
+// to RAY_LEN yards. Each reports the first tree canopy on the line and the
+// steepest rise of the ground along it - what stands between the ball and a
+// clean strike, at a resolution the grids cannot give right next to the ball.
+const RAYS = Array.from({length: 13}, (_, i)=> (i - 6)*Math.PI/18);
+const RAY_LEN = 80, RAY_STEPS = [4, 8, 14, 22, 32, 45, 60];
 const CH = 6; // grid channels: hazard, sand, green, short grass, tree, height
 
-export const OBS_DIM = 7 + 2 + 2 + 3 + 3 + 2 + 1 + 3 + 11 + 3 + 8 + 5 + 2*LOOK.length
+export const OBS_DIM = 7 + 2 + 2 + 3 + 3 + 2 + 1 + 3 + 11 + 3 + 8 + 5 + 2*LOOK.length + 3 + 2*RAYS.length
     + CH*(GA_FWD.length*GA_LAT.length + GB_FWD.length*GB_LAT.length);
 
 export const DEFAULT_ENV = {
@@ -67,6 +73,7 @@ export class GolfEnv
         G.ballEvent = 0;
         this.strokes = 0; this.penalties = 0; this.done = false;
         this.log = [];
+        this.prev = {moved: 0, tree: 0, hazard: 0};
         this.buildTreeHash();
         return this.observe();
     }
@@ -126,6 +133,9 @@ export class GolfEnv
         for (let c = 0; c < 11; ++c) put(c == auto ? 1 : 0);                   // 11 game's club
         const dp = G.distToPath(b.x, b.z), along = G.lastAlong;
         put(dp/60); put(along/h.len); put((h.len - along)/300);                // 3 path progress
+        const pv = this.prev;                                                  // 3 last shot
+        put(Math.log1p(pv.moved)/6); put(pv.tree); put(pv.hazard);
+        this.rays(dir, hb, put);                                               // 26 line of fire
 
         // 8: the putt preview, twice (to the cup, and to the bar's default top)
         for (const k of [1, G.PUTT_OVER])
@@ -184,6 +194,29 @@ export class GolfEnv
             }
         if (i != OBS_DIM) throw new Error(`obs size ${i} != ${OBS_DIM}`);
         return o;
+    }
+
+    rays(dir, hb, put)
+    {
+        const G = this.G, b = G.ball;
+        const near = [];
+        for (const t of this.h.near)
+            if (Math.hypot(t.x-b.x, t.z-b.z) < RAY_LEN + t.s) near.push(t);
+        for (const off of RAYS)
+        {
+            const a = dir + off, ux = Math.sin(a), uz = Math.cos(a);
+            let hit = RAY_LEN;
+            for (const t of near)
+            {
+                const dx = t.x-b.x, dz = t.z-b.z, al = dx*ux + dz*uz;
+                const pp = Math.abs(dx*uz - dz*ux);
+                if (al > 0 && pp < t.s) hit = Math.min(hit, Math.max(0, al - Math.sqrt(t.s*t.s - pp*pp)));
+            }
+            let rise = -1;
+            for (const r of RAY_STEPS)
+                rise = Math.max(rise, Math.tanh((G.heightAt(b.x + ux*r, b.z + uz*r) - hb)/r*2));
+            put(1 - hit/RAY_LEN); put(rise);
+        }
     }
 
     // The game's putt preview (predictLanding's roll loop), plus the closest
@@ -248,6 +281,8 @@ export class GolfEnv
         }
         const b = G.ball;
         b.vx = b.vy = b.vz = 0;
+        this.prev = {moved: Math.hypot(b.x - G.shotStart.x, b.z - G.shotStart.z),
+            tree: G.treeHit ? 1 : 0, hazard: result == 'water' || result == 'ob' ? 1 : 0};
         this.log.push({club: G.CLUBS[s.club][0], spin: s.spin, lie, from: d0, want: s.want,
             power: s.power, result, to: this.pinDist(), tree: G.treeHit});
         if (ev == G.EV_HOLED || this.strokes >= this.h.par + cfg.maxOver)
