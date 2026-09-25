@@ -1,0 +1,280 @@
+// GolfEnv: one episode = one hole of Sunshine Golf Classic, one step = one
+// stroke. Full spec in docs/SPEC.md - keep the two in sync (OBS_VERSION).
+//
+// The agent sees what a human player sees: the terrain ahead, the wind arrow,
+// the lie, the club the game pre-selects, and the aim preview (the ring the
+// game draws for the default shot, including the putt line with its break).
+// It acts the way a player does: pick a club, a spin, an aim and a distance;
+// the swing itself goes through the game's launchBall with meter-timing noise.
+import { loadGame, mulberry32 } from './sim/loader.mjs';
+
+export const OBS_VERSION = 1;
+export const CLASSIC_SEED = 1113;
+export const N_CLUBS = 11, N_SPIN = 3;
+
+// Action decoding (see SPEC.md). Raw continuous outputs are clipped, then:
+//   aim  = pinDir + AIM_SCALE*aimRaw           (radians)
+//   dist = pinDist * exp(DIST_SCALE*distRaw)   (yards the shot is asked to go)
+export const AIM_SCALE = .35, AIM_CLIP = 3;
+export const DIST_SCALE = .35, DIST_LO = -4, DIST_HI = 2;
+
+// Observation grids, in the PIN FRAME: +fwd points from the ball to the pin,
+// +lat is to the right of that line (the side a +aim offset moves the shot).
+// Grid A is scaled by the distance to the pin (it sees the green's contour on
+// a putt and the whole hole on a drive); grid B is fixed in yards and covers
+// full-swing landing zones.
+const GA_FWD = [-.1, .1, .25, .4, .55, .7, .8, .9, 1, 1.1, 1.25, 1.5];
+const GA_LAT = [-.4, -.25, -.12, -.05, 0, .05, .12, .25, .4];
+const GB_FWD = Array.from({length: 15}, (_, i)=> 20 + 20*i);
+const GB_LAT = [-50, -30, -15, 0, 15, 30, 50];
+const LOOK = Array.from({length: 10}, (_, i)=> 30 + 30*i);
+const CH = 6; // grid channels: hazard, sand, green, short grass, tree, height
+
+export const OBS_DIM = 7 + 2 + 2 + 3 + 3 + 2 + 1 + 3 + 11 + 3 + 8 + 5 + 2*LOOK.length
+    + CH*(GA_FWD.length*GA_LAT.length + GB_FWD.length*GB_LAT.length);
+
+export const DEFAULT_ENV = {
+    impactNoise: .04,  // uniform +- swing meter timing error (the scripted bot's)
+    aimNoise: .015,    // uniform +- radians on full swings (the scripted bot's)
+    maxOver: 5,        // the game's mercy rule: pick up at par+5
+};
+
+const TREE_CELL = 8;
+
+export class GolfEnv
+{
+    constructor(cfg = {})
+    {
+        this.cfg = {...DEFAULT_ENV, ...cfg};
+        const {G, Math: M} = loadGame();
+        this.G = G; this.M = M;
+        this.obs = new Float32Array(OBS_DIM);
+    }
+
+    // opts: {seed, remix, hole (0-17), rngSeed}
+    reset({seed = CLASSIC_SEED, remix = false, hole = 0, rngSeed = 1} = {})
+    {
+        const G = this.G;
+        this.M.random = mulberry32(rngSeed);
+        G.remixMode = remix ? 1 : 0;
+        const rows = G.genCourse(seed, remix ? 1 : 0);
+        G.genHole(seed, hole, rows[hole]);
+        this.h = G.hole;
+        this.seed = seed; this.remix = remix; this.holeIndex = hole;
+        const b = G.ball;
+        b.x = b.z = b.vx = b.vy = b.vz = 0;
+        b.y = G.groundAt(0, 0).h;
+        G.ballEvent = 0;
+        this.strokes = 0; this.penalties = 0; this.done = false;
+        this.log = [];
+        this.buildTreeHash();
+        return this.observe();
+    }
+
+    buildTreeHash()
+    {
+        this.trees = new Map();
+        for (const t of this.h.near)
+        {
+            const r = Math.ceil(t.s/TREE_CELL);
+            const cx = Math.floor(t.x/TREE_CELL), cz = Math.floor(t.z/TREE_CELL);
+            for (let i = -r; i <= r; ++i)
+                for (let j = -r; j <= r; ++j)
+                {
+                    const k = (cx+i)*65536 + (cz+j);
+                    let a = this.trees.get(k);
+                    a || this.trees.set(k, a = []);
+                    a.push(t);
+                }
+        }
+    }
+
+    treeAt(x, z)
+    {
+        const a = this.trees.get(Math.floor(x/TREE_CELL)*65536 + Math.floor(z/TREE_CELL));
+        if (a) for (const t of a)
+            if ((x-t.x)**2 + (z-t.z)**2 < t.s*t.s) return 1;
+        return 0;
+    }
+
+    pinDist() { const G = this.G; return Math.hypot(G.hole.pin.x-G.ball.x, G.hole.pin.z-G.ball.z); }
+    pinDir() { const G = this.G; return Math.atan2(G.hole.pin.x-G.ball.x, G.hole.pin.z-G.ball.z); }
+
+    observe()
+    {
+        const G = this.G, h = this.h, b = G.ball, o = this.obs;
+        let i = 0;
+        const put = (v)=> { o[i++] = v; };
+        const d = this.pinDist(), dir = this.pinDir();
+        const sn = Math.sin(dir), cs = Math.cos(dir);
+        // world <-> pin frame
+        const toW = (f, l)=> [b.x + sn*f + cs*l, b.z + cs*f - sn*l];
+        const toP = (x, z)=> { const dx = x-b.x, dz = z-b.z; return [dx*sn + dz*cs, dx*cs - dz*sn]; };
+        const g = G.groundAt(b.x, b.z), hb = g.h;
+
+        for (let s = 0; s < 7; ++s) put(g.s == s ? 1 : 0);                    // 7 lie
+        put(G.lieMul(0)); put(G.lieMul(8));                                    // 2 lie multipliers
+        const wr = h.wind.a - dir;
+        put(h.wind.s*Math.cos(wr)/8); put(h.wind.s*Math.sin(wr)/8);           // 2 wind along/cross
+        for (const p of [3, 4, 5]) put(h.par == p ? 1 : 0);                    // 3 par
+        put(this.strokes/10); put((h.par + this.cfg.maxOver - this.strokes)/10); put(h.hills); // 3
+        const [gx, gz] = G.slopeAt(b.x, b.z);
+        put((gx*sn + gz*cs)*5); put((gx*cs - gz*sn)*5);                         // 2 slope at ball
+        put(Math.tanh((G.heightAt(h.pin.x, h.pin.z) - hb)/10));                // 1 pin height
+        put(d/300); put(Math.log1p(d)/6); put(d < 45 ? 1 : 0);                 // 3 distance
+        const auto = G.autoClub();
+        for (let c = 0; c < 11; ++c) put(c == auto ? 1 : 0);                   // 11 game's club
+        const dp = G.distToPath(b.x, b.z), along = G.lastAlong;
+        put(dp/60); put(along/h.len); put((h.len - along)/300);                // 3 path progress
+
+        // 8: the putt preview, twice (to the cup, and to the bar's default top)
+        for (const k of [1, G.PUTT_OVER])
+        {
+            if (d < 45)
+            {
+                const t = this.puttPreview(d*k, dir);
+                const [f, l] = toP(t.x, t.z);
+                put(Math.tanh((f - d)/Math.max(d, 1))); put(Math.tanh(l/Math.max(d, 1)*5));
+                put(Math.tanh(t.lat/Math.max(d, 1)*5)); put(t.best < G.HOLE_R ? 1 : 0);
+            }
+            else { put(0); put(0); put(0); put(0); }
+        }
+        // 5: the flight preview of the game's club at the pin, in still air
+        if (auto != G.CLUB_PUTTER)
+        {
+            const lm = G.lieMul(auto);
+            const power = Math.min(1, d/(G.CLUBS[auto][1]*lm));
+            const p = G.predictLanding(auto, dir, 0, lm, power);
+            const [f, l] = toP(p.x, p.z);
+            put(Math.tanh((f - d)/50)); put(Math.tanh(l/30)); put(p.hit ? 1 : 0);
+            const s = G.surfaceAt(p.x, p.z);
+            put(s >= G.SURF_WATER ? 1 : 0); put(s == G.SURF_BUNKER ? 1 : 0);
+        }
+        else { put(0); put(0); put(0); put(0); put(0); }
+        // 20: the centreline ahead
+        for (const a of LOOK)
+        {
+            const p = G.pathPointAt(Math.min(along + a, h.len));
+            const [f, l] = toP(p.x, p.z);
+            put(f/300); put(l/300);
+        }
+
+        const cell = (x, z, hs)=>
+        {
+            const s = G.surfaceAt(x, z);
+            put(s >= G.SURF_WATER ? 1 : 0);
+            put(s == G.SURF_BUNKER ? 1 : 0);
+            put(s == G.SURF_GREEN ? 1 : 0);
+            put(s == G.SURF_FAIRWAY || s == G.SURF_TEE ? 1 : 0);
+            put(this.treeAt(x, z));
+            put(Math.tanh((G.heightAt(x, z) - hb)/hs));
+        };
+        const sc = Math.max(d, 4);
+        for (const f of GA_FWD)
+            for (const l of GA_LAT)
+            {
+                const [x, z] = toW(f*sc, l*sc);
+                cell(x, z, Math.max(.5, sc*.05));
+            }
+        for (const f of GB_FWD)
+            for (const l of GB_LAT)
+            {
+                const [x, z] = toW(f, l);
+                cell(x, z, 15);
+            }
+        if (i != OBS_DIM) throw new Error(`obs size ${i} != ${OBS_DIM}`);
+        return o;
+    }
+
+    // The game's putt preview (predictLanding's roll loop), plus the closest
+    // pass to the cup - the same line the player watches bend on screen.
+    puttPreview(dist, dir)
+    {
+        const G = this.G, px = G.hole.pin.x, pz = G.hole.pin.z;
+        const sn = Math.sin(dir), cs = Math.cos(dir);
+        const r = G.puttVel({x: G.ball.x, y: G.ball.y, z: G.ball.z}, dist, dir);
+        let best = 1e9, lat = 0;
+        G.rollRest = 0;
+        for (let i = 0; i < 600 && !G.rollRest; ++i)
+        {
+            G.rollStep(r);
+            const cd = Math.hypot(r.x-px, r.z-pz);
+            if (cd < best) { best = cd; lat = (r.x-px)*cs - (r.z-pz)*sn; }
+        }
+        return {x: r.x, z: r.z, best, lat};
+    }
+
+    // Decode a raw action into the shot the game will play.
+    decode({club, spin, aim, dist})
+    {
+        const G = this.G;
+        const d = this.pinDist();
+        const yaw = this.pinDir() + AIM_SCALE*clip(aim, -AIM_CLIP, AIM_CLIP);
+        const want = Math.max(.3, d*Math.exp(DIST_SCALE*clip(dist, DIST_LO, DIST_HI)));
+        const lm = G.lieMul(club);
+        const power = club == G.CLUB_PUTTER
+            ? clip(want/G.PUTT_MAX, .005, 1)
+            : clip(want/(G.CLUBS[club][1]*lm), .02, 1);
+        return {club, spin: club == G.CLUB_PUTTER ? 0 : spin - 1, yaw, power, lm, want};
+    }
+
+    // action: {club 0-10, spin 0-2 (back/none/top), aim, dist}
+    // returns {obs, reward, done, info}
+    step(action)
+    {
+        if (this.done) throw new Error('step after done');
+        const G = this.G, M = this.M, cfg = this.cfg;
+        const s = this.decode(action);
+        const putt = s.club == G.CLUB_PUTTER;
+        const lie = G.SURF_NAMES[G.groundAt(G.ball.x, G.ball.z).s], d0 = this.pinDist();
+        // the swing meter: a player's timing is never perfect
+        const impact = (M.random()*2 - 1)*cfg.impactNoise;
+        const yaw = s.yaw + (putt ? 0 : (M.random()*2 - 1)*cfg.aimNoise);
+        // the pin is pulled for a shot from inside 10yd, exactly as enterAim does
+        G.pinOut = d0 < 10 ? 1 : 0;
+        G.treeHit = 0;
+        G.launchBall(s.club, s.power, impact, s.spin, yaw, s.lm);
+        ++this.strokes;
+        let reward = -1;
+        for (let t = 0; t < 60*30 && !G.ballEvent; ++t)
+            G.ballUpdate();
+        const ev = G.ballEvent || G.EV_STOPPED; // a ball that never settles is played where it lies
+        G.ballEvent = 0;
+        let result = ev == G.EV_HOLED ? 'holed' : ev == G.EV_WATER ? 'water' : ev == G.EV_OB ? 'ob' : 'stopped';
+        if (ev == G.EV_WATER || ev == G.EV_OB)
+        {
+            ++this.strokes; ++this.penalties; reward -= 1;
+            this.hazardDrop();
+        }
+        const b = G.ball;
+        b.vx = b.vy = b.vz = 0;
+        this.log.push({club: G.CLUBS[s.club][0], spin: s.spin, lie, from: d0, want: s.want,
+            power: s.power, result, to: this.pinDist(), tree: G.treeHit});
+        if (ev == G.EV_HOLED || this.strokes >= this.h.par + cfg.maxOver)
+            this.done = true;
+        return {obs: this.done ? null : this.observe(), reward, done: this.done,
+            info: {result, strokes: this.strokes, par: this.h.par, holed: ev == G.EV_HOLED}};
+    }
+
+    // Penalty drop, verbatim from game.js updateFlight: walk back along the shot
+    // from the last safe point until the ball can stay.
+    hazardDrop()
+    {
+        const G = this.G, b = G.ball, safe = G.ballSafe, start = G.shotStart;
+        const dx = start.x-safe.x, dz = start.z-safe.z;
+        const dl = Math.hypot(dx, dz) || 1;
+        for (let d = 2; ; d += 2)
+        {
+            const t = Math.min(d, dl);
+            b.x = safe.x + dx/dl*t;
+            b.z = safe.z + dz/dl*t;
+            const g = G.groundAt(b.x, b.z);
+            b.y = g.h;
+            if (t == dl || g.s < G.SURF_WATER && g.s != G.SURF_GREEN
+                && Math.hypot(...G.slopeAt(b.x, b.z))*G.GRAV < G.SURF_PHYS[g.s][2])
+                break;
+        }
+    }
+}
+
+export const clip = (v, lo, hi)=> v < lo ? lo : v > hi ? hi : v;

@@ -1,0 +1,14 @@
+{
+  "name": "golf13kai",
+  "version": "0.1.0",
+  "description": "Reinforcement learning agent for Sunshine Golf Classic (Golf13K), in dependency-free Node.js",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test \"rl/test/*.test.mjs\"",
+    "train": "node rl/train.mjs",
+    "eval": "node rl/eval.mjs",
+    "baseline": "node rl/baseline.mjs"
+  }
+}
