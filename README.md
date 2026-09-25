@@ -33,6 +33,7 @@ npm run baseline
 npm run train -- --name myrun            # uses every core; ~18s per iteration on 16
 npm run eval -- runs/myrun/best.json --card
 npm run web                              # watch models/agent.json play
+npm run build:web                        # the same as one html file: build/index.html
 ```
 
 This needs Node ≥ 20. Nothing to install.

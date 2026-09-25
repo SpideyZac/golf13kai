@@ -14,7 +14,7 @@ A reinforcement learning agent for **Sunshine Golf Classic**, Frank Force's JS13
 - `rl/worker.mjs` / `rl/pool.mjs`: worker threads doing rollouts and gradient shards over a `SharedArrayBuffer` of params.
 - `rl/train.mjs`: the PPO loop, writing `runs/<name>/{log.csv,best.json,last.json,config.json}`.
 - `rl/eval.mjs`, `rl/baseline.mjs`, `rl/courses.mjs`, `rl/plot.mjs`: evaluation, reference bots, the train/eval split, and learning-curve SVGs.
-- `rl/web/`: `index.html` (the game's script list plus `ai.mjs`), `ai.mjs` (replaces the dev bot's global `botSwing`), and `serve.mjs`.
+- `rl/web/`: `index.html` (the game's script list plus `ai.mjs`), `ai.mjs` (replaces the dev bot's global `botSwing`), `serve.mjs`, and `build.mjs` (everything, model included, inlined into one `build/index.html`).
 - `docs/`: `SPEC.md` (env contract), `TRAINING.md` (how to train, results log, known weaknesses), `DESIGN.md` (why, history, findings).
 
 ## Commands
@@ -27,6 +27,7 @@ npm run eval -- --set classic --rounds 1 --shots    # every shot of one round (m
 npm run baseline -- --rounds 20                     # default-shot + scripted bot references
 npm run plot -- runs/r5/log.csv docs/img/r5.svg
 npm run web                                         # http://localhost:8013/rl/web/?auto=1
+npm run build:web                                   # build/index.html: one file, open from disk, auto-plays
 ```
 
 ## Rules of thumb
@@ -37,5 +38,5 @@ npm run web                                         # http://localhost:8013/rl/w
 - **After editing `nn.mjs` or `policy.mjs` math, run `npm test`.** It holds finite-difference checks.
 - **Rule mirrors.** `GolfEnv.hazardDrop` and the pin rule mirror `Golf13K/game/game.js`, and `Observer.reference()` mirrors `aimDefault`. Re-check them if the submodule is bumped.
 - **Performance.** A game instance in `node:vm` was 20× slower, which is why it is a closure. A step costs about 7 ms, and a 256-sample fwd+bwd of both nets about 0.5 s. Training saturates every core, so don't run evals alongside it unless you accept the slowdown.
-- **Headless screenshots.** Headless Chrome screenshots of the WebGL game come out black. Verify the browser agent from its console log (`AI …`, `SHOT …`, `RESULT …`) instead.
+- **No doctype on the web pages.** The engine sizes its canvas from `body.clientHeight`, which is the viewport only in quirks mode. With `<!doctype html>` the canvas is 0px tall and the screen is black while the game keeps playing (`build.mjs` refuses to emit one). Headless Chrome screenshots work (`--use-angle=swiftshader`), and the console log (`AI …`, `SHOT …`, `RESULT …`) shows every shot.
 - **Commits** use Conventional Commits (`feat(rl): …`, `docs: …`, `fix(env): …`). `runs/` is git-ignored, so copy a checkpoint to `models/` to ship it.

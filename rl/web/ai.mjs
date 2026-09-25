@@ -6,6 +6,10 @@
 // the same launchBall with the same meter noise.
 //
 // Query params: ?model=<url of a checkpoint json> (default ../../models/agent.json)
+//
+// The single-file build (rl/web/build.mjs) sets window.RL_MODEL (the checkpoint
+// itself, used unless ?model= is given) and window.RL_AUTO (play without
+// ?auto=1; ?auto=0 still turns it off).
 import { API_BODY } from '../sim/api.mjs';
 import { Observer, OBS_VERSION, OBS_DIM, CLUB_NAMES, isStuck } from '../obs.mjs';
 import { Model } from '../policy.mjs';
@@ -16,16 +20,26 @@ const G = new Function(API_BODY)();
 const observer = new Observer(G);
 const q = new URLSearchParams(location.search);
 const MODEL_URL = q.get('model') || '../../models/agent.json';
+const EMBEDDED = !q.get('model') && window.RL_MODEL;
+
+// the game's gameInit has already run (this module executes after every
+// classic script), so this is the T key's path: switch the bot on and, at the
+// title, deal a round
+if (window.RL_AUTO && !autoPlay && q.get('auto') !== '0')
+{
+    autoPlay = 1;
+    state == ST_TITLE && startCourse(+q.get('remix') || 0);
+}
 
 let model = null;
-fetch(MODEL_URL).then(r => r.json()).then(j =>
+(EMBEDDED ? Promise.resolve(EMBEDDED) : fetch(MODEL_URL).then(r => r.json())).then(j =>
 {
     if (j.obsVersion != OBS_VERSION || j.obsDim != OBS_DIM)
         throw new Error(`model is obs v${j.obsVersion}, page is v${OBS_VERSION}`);
     const bin = atob(j.params), u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) u8[i] = bin.charCodeAt(i);
     model = new Model(j.arch).bind(new Float32Array(u8.buffer));
-    console.log(`RL agent loaded: ${MODEL_URL} (iter ${j.meta?.iter}, ${model.size} params)`);
+    console.log(`RL agent loaded: ${EMBEDDED ? 'embedded model' : MODEL_URL} (iter ${j.meta?.iter}, ${model.size} params)`);
     autoPlay || console.log('add ?auto=1 to the URL to let the agent play');
 }).catch(e => console.error('RL agent failed to load:', e));
 

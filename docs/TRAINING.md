@@ -8,6 +8,7 @@ npm run baseline                                  # reference scores (about 30s)
 npm run train -- --name myrun --iters 300         # all cores; Ctrl-C is safe after an eval
 npm run eval -- runs/myrun/best.json --card       # held-out classic + remix rounds
 npm run web                                       # then open http://localhost:8013/rl/web/?auto=1
+npm run build:web                                 # or: build/index.html, one self-contained file
 ```
 
 Each run writes to `runs/<name>/`:

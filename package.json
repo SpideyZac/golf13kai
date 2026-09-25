@@ -11,6 +11,7 @@
     "eval": "node rl/eval.mjs",
     "baseline": "node rl/baseline.mjs",
     "web": "node rl/web/serve.mjs",
+    "build:web": "node rl/web/build.mjs",
     "plot": "node rl/plot.mjs"
   }
 }
