@@ -10,6 +10,7 @@
     "train": "node rl/train.mjs",
     "eval": "node rl/eval.mjs",
     "baseline": "node rl/baseline.mjs",
-    "web": "node rl/web/serve.mjs"
+    "web": "node rl/web/serve.mjs",
+    "plot": "node rl/plot.mjs"
   }
 }
