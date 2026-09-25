@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" font-family="system-ui,sans-serif" role="img" aria-label="Learning curve">
+<style>
+  .bg{fill:#fcfcfb}.grid{stroke:#e4e3dc;stroke-width:1}.tick,.lab{fill:#6b6a63;font-size:12px}.ttl{fill:#1a1a19;font-size:15px;font-weight:600}
+  .c{stroke:#2a78d6}.r{stroke:#eb6834}.s{stroke-width:1.5;stroke-dasharray:4 4}.dl{fill:#1a1a19;font-size:12px}
+  @media (prefers-color-scheme: dark){.bg{fill:#1a1a19}.grid{stroke:#3a3a37}.tick,.lab{fill:#c3c2b7}.ttl,.dl{fill:#fff}.c{stroke:#3987e5}.r{stroke:#d95926}}
+</style>
+<rect class="bg" width="720" height="360" rx="8"/>
+<text class="ttl" x="56" y="24">Held-out eval, strokes to par per 18-hole round (up is better)</text>
+<line class="grid" x1="56" x2="610" y1="40" y2="40"/><text class="tick" x="48" y="44" text-anchor="end">-15</text><line class="grid" x1="56" x2="610" y1="86" y2="86"/><text class="tick" x="48" y="90" text-anchor="end">-10</text><line class="grid" x1="56" x2="610" y1="132" y2="132"/><text class="tick" x="48" y="136" text-anchor="end">-5</text><line class="grid" x1="56" x2="610" y1="178" y2="178"/><text class="tick" x="48" y="182" text-anchor="end">0</text><line class="grid" x1="56" x2="610" y1="224" y2="224"/><text class="tick" x="48" y="228" text-anchor="end">+5</text><line class="grid" x1="56" x2="610" y1="270" y2="270"/><text class="tick" x="48" y="274" text-anchor="end">+10</text><line class="grid" x1="56" x2="610" y1="316" y2="316"/><text class="tick" x="48" y="320" text-anchor="end">+15</text><text class="tick" x="56" y="334" text-anchor="middle">0</text><text class="tick" x="194.5" y="334" text-anchor="middle">100</text><text class="tick" x="333" y="334" text-anchor="middle">200</text><text class="tick" x="471.5" y="334" text-anchor="middle">300</text><text class="tick" x="610" y="334" text-anchor="middle">400</text>
+<line class="grid" x1="56" x2="610" y1="178" y2="178" style="stroke-width:1.5"/>
+<path class="c s" fill="none" d="M56,151.78H610"/><path class="r s" fill="none" d="M56,168.34H610"/>
+<path class="c" fill="none" stroke-width="2" stroke-linejoin="round" d="M69.8,253.9L83.7,233.2L97.5,115.9L111.4,99.8L125.3,104.4L139.1,134.3L152.9,104.4L166.8,81.4L180.7,79.1L194.5,99.8L208.4,109.0L222.2,106.7L236.1,95.2L249.9,86.0L263.8,83.7L277.6,90.6L291.4,106.7L305.3,113.6L319.1,86.0L333.0,83.7L346.9,99.8L360.7,102.1L374.5,86.0L388.4,86.0L402.3,90.6L416.1,92.9L430.0,97.5L443.8,88.3L457.6,86.0L471.5,69.9L485.4,83.7L499.2,67.6L513.0,76.8L526.9,72.2L540.8,88.3L554.6,81.4L568.5,92.9L582.3,88.3L596.1,69.9L610.0,88.3"/>
+<path class="r" fill="none" stroke-width="2" stroke-linejoin="round" d="M69.8,306.8L83.7,233.2L97.5,187.2L111.4,157.3L125.3,132.0L139.1,122.8L152.9,145.8L166.8,106.7L180.7,111.3L194.5,120.5L208.4,109.0L222.2,102.1L236.1,97.5L249.9,106.7L263.8,102.1L277.6,136.6L291.4,127.4L305.3,95.2L319.1,141.2L333.0,104.4L346.9,99.8L360.7,104.4L374.5,81.4L388.4,76.8L402.3,58.4L416.1,72.2L430.0,86.0L443.8,90.6L457.6,83.7L471.5,95.2L485.4,92.9L499.2,92.9L513.0,81.4L526.9,106.7L540.8,90.6L554.6,72.2L568.5,79.1L582.3,86.0L596.1,69.9L610.0,72.2"/>
+<text class="dl" x="618" y="92.3">classic -9.75</text>
+<text class="dl" x="618" y="76.2">remix -11.5</text>
+<text class="lab" x="333" y="352" text-anchor="middle">training iteration (~15k strokes each) · dashed: scripted bot</text>
+</svg>
