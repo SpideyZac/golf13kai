@@ -32,12 +32,13 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from . import sim
+from . import shaping, sim
 from .evaluate import play, summarise
 from .model import DEFAULT_HIDDEN, N_CONT, Model, entropies, load_js, log_prob, sample, save_js
 
 LOG_COLS = ['iter', 'steps', 'episodes', 'toPar', 'penalties', 'pickups', 'pl', 'vl', 'ent', 'kl', 'clipfrac',
-            'gradNorm', 'lr', 'sps', 'evalClassic', 'evalRemix', 'solveRate', 'solveHoled', 'longHoleOuts']
+            'gradNorm', 'lr', 'sps', 'evalClassic', 'evalRemix', 'solveRate', 'solveHoled', 'longHoleOuts',
+            'sandRate', 'treeRate', 'targetMiss', 'shapedPenalty']
 
 
 def parse(argv=None):
@@ -76,6 +77,7 @@ def parse(argv=None):
     ap.add_argument('--eval-rounds', type=int, default=4)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--device', default='auto', help='auto, cuda, cuda:1, cpu, ...')
+    shaping.add_args(ap)
     return ap.parse_args(argv)
 
 
@@ -112,6 +114,9 @@ def main(argv=None):
     recent = collections.deque(maxlen=2000)
     shots = collections.deque(maxlen=20000)  # per stroke: (the solver's shot, holed)
     long_holes = collections.deque(maxlen=2000)  # per hole: holed out from 30+ yards
+    shaped = collections.deque(maxlen=20000)  # per stroke: (ended in sand, hit a tree, shaping penalty)
+    tee_holes = collections.deque(maxlen=2000)  # per tee-start hole: worse than --target-score
+    sc = shaping.ShapingCfg.from_args(a)
     if state:
         model.load_state_dict(state['model'])
         opt.load_state_dict(state['opt'])
@@ -131,7 +136,7 @@ def main(argv=None):
         log_path.write_text(','.join(LOG_COLS) + '\n')
     n_params = sum(p.numel() for p in model.parameters())
     print(f'run {a.name}: {n} envs x {T} steps = {n * T} strokes/iter on {dev}, {n_params} params,'
-          f' env threads {a.threads or os.cpu_count()}, rules {rules}')
+          f' env threads {a.threads or os.cpu_count()}, rules {rules}, penalty shaping: {sc.describe()}')
 
     D = sim.OBS_DIM
     buf_obs = torch.zeros((T, n, D), device=dev)
@@ -153,7 +158,7 @@ def main(argv=None):
             model.actor[-1].bias[sim.CLUB_SOLVE] = b
         print(f'upgraded {a.init} from obs v3: SOLVE bias {b:.2f} (starts at ~{p:.0%} of shots)')
     meta = lambda it, **k: {'iter': it, 'totalSteps': total_steps, 'bestEval': best_eval, 'trainer': 'python',
-                            'env': rules, **k}
+                            'env': rules, 'shaping': vars(sc), **k}
 
     for it in range(start_iter, a.iters):
         t0 = time.perf_counter()
@@ -174,14 +179,19 @@ def main(argv=None):
                 buf_val[t] = v
                 c = cont.double().cpu().numpy()
                 o, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), c[:, 0], c[:, 1], c[:, 2])
-                buf_rew[t] = torch.from_numpy(info[:, sim.REWARD]).to(dev)
+                pen = shaping.penalty(sc, info)
+                buf_rew[t] = torch.from_numpy(info[:, sim.REWARD] + pen).to(dev)
                 buf_done[t] = torch.from_numpy(info[:, sim.DONE]).to(dev)
+                in_sand, hit_tree, missed = shaping.terms(sc, info)
+                shaped.extend(zip(in_sand, hit_tree, pen))
                 holed = info[:, sim.RESULT] == 0
                 shots.extend(zip(info[:, sim.SOLVED] > 0, holed))
                 for i in np.flatnonzero(info[:, sim.DONE]):
                     r = info[i]
                     recent.append((r[sim.STROKES] - r[sim.PAR], r[sim.PENALTIES], not r[sim.HOLED]))
                     long_holes.append(bool(holed[i] and r[sim.FROM] >= 30))
+                    if r[sim.TEE]:
+                        tee_holes.append(bool(missed[i]))
                 obs = torch.from_numpy(o).to(dev)
             next_v = model.critic(obs).squeeze(-1)
             # GAE; a finished episode's next value is 0 (it ended)
@@ -244,6 +254,9 @@ def main(argv=None):
         solve_rate = sh[:, 0].mean()
         solve_holed = sh[sh[:, 0], 1].mean() if sh[:, 0].any() else 0.
         long_ho = np.mean(long_holes) if long_holes else 0.
+        sp = np.array(shaped, float) if shaped else np.zeros((1, 3))
+        sand_rate, tree_rate, shaped_pen = sp[:, 0].mean(), sp[:, 1].mean(), sp[:, 2].mean()
+        target_miss = np.mean(tee_holes) if tee_holes else 0.
         ev_c = ev_r = ''
         if a.eval_every and ((it + 1) % a.eval_every == 0 or it == a.iters - 1):
             c = summarise(play(model, sim.eval_set('classic', a.eval_rounds), dev, threads=a.threads, rules=rules))
@@ -264,11 +277,14 @@ def main(argv=None):
         Bn = max(1, st['B'])
         row = [it + 1, total_steps, len(recent), f'{to_par:.3f}', f'{pen:.3f}', f'{pick:.3f}', f"{st['pl'] / Bn:.4f}",
                f"{st['vl'] / Bn:.4f}", f"{st['ent'] / Bn:.3f}", f'{kl:.4f}', f"{st['clip'] / Bn:.3f}", f'{gn:.3f}',
-               f'{lr:.2e}', int(n * T / dt), ev_c, ev_r, f'{solve_rate:.4f}', f'{solve_holed:.4f}', f'{long_ho:.4f}']
+               f'{lr:.2e}', int(n * T / dt), ev_c, ev_r, f'{solve_rate:.4f}', f'{solve_holed:.4f}', f'{long_ho:.4f}',
+               f'{sand_rate:.4f}', f'{tree_rate:.4f}', f'{target_miss:.4f}', f'{shaped_pen:.4f}']
         with log_path.open('a', newline='') as fh:
             csv.writer(fh).writerow(row)
         print(f"it {it + 1} steps {total_steps} toPar/hole {to_par:.3f} pen {pen:.2f} pick {pick:.3f}"
               f" solve {solve_rate:.1%} (in {solve_holed:.1%}) longHO {long_ho:.1%}"
+              f" sand {sand_rate:.1%} tree {tree_rate:.1%} >{sc.target_score:+g} {target_miss:.0%}"
+              f"{f' shaped {shaped_pen:+.3f}' if sc.on else ''}"
               f" vl {st['vl'] / Bn:.3f} ent {st['ent'] / Bn:.2f} kl {kl:.4f} clip {st['clip'] / Bn:.3f} gn {gn:.2f}"
               f" {int(n * T / dt)} sps (rollout {t_roll:.1f}s, update {dt - t_roll:.1f}s)", flush=True)
     env.close()

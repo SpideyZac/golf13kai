@@ -57,6 +57,8 @@ Where the time goes: the envs run on the CPU, one per core (~24k strokes/s on 16
 | `--no-solver` | (on) | Turns the solver off: its observation block is zeros and `SOLVE` plays the game's club. Eval follows the same setting. |
 | `--exact-solve` | off | The solver's shots skip the swing noise, so every solution drops (see below) |
 | `--impact-noise` / `--aim-noise` | 0.04 / 0.015 | Swing error on every shot. 0 removes it. |
+| `--sand-penalty` / `--tree-penalty` | 0 (off) | Extra penalty per shot that ends in a bunker / hits a tree (see Penalty shaping) |
+| `--target-score` / `--target-penalty` | −2 / 0 (off) | Extra penalty for a hole (from the tee) scored worse than the target |
 | `--init-solve-p` | 0.15 | With a v3 `--init`: the share of shots the upgraded agent starts out playing `SOLVE` |
 
 The original pure-Node trainer (`npm run train`, `rl/train.mjs`) still works and takes the same PPO flags, with `--workers` in place of `--envs`. It is ~18× slower.
@@ -106,6 +108,25 @@ The rules are saved in every checkpoint (`meta.env`). `golfrl.evaluate` (overrid
 **Hooks and slices.** The agent also chooses the swing-meter impact it swings for (the third continuous action, see [SPEC.md](SPEC.md#action)), and the solver curves shots around trees. A shaped swing gives up the game's perfect-strike snap, so the agent has to learn when a curve is worth it. The upgraded head starts every swing straight, with a narrow spread.
 
 **The shipped model** (`models/agent.json`) is r4 upgraded to v5 with the `SOLVE` bias at −20 (`python -m golfrl.upgrade`). It never picks `SOLVE`, and its deterministic play (the mode swings straight) is exactly as before. Replace it with a solver-trained run once there is one.
+
+## Penalty shaping
+
+Optional extra penalties, added by the trainer on top of the −1 per stroke (`py/golfrl/shaping.py`). All are off (0) by default:
+
+| Flags | Penalty |
+|---|---|
+| `--sand-penalty X` | X for every shot that comes to rest in a bunker. A splash that stays in the sand counts again. |
+| `--tree-penalty X` | X for every shot that strikes a tree |
+| `--target-score T --target-penalty X` | X, once at the end, for a hole played from the tee that finishes **worse than T** to par. T = −2 penalises everything worse than an eagle. Exploring starts are skipped, because their score to par means nothing. |
+
+```sh
+python -m golfrl.train --name strict1 --init ../models/agent.json --exact-solve \
+    --sand-penalty 2 --tree-penalty 2 --target-score -2 --target-penalty 3
+```
+
+The env, its rules and the Rust/JS parity are untouched. The evals, the log's `toPar` and the `best.json` selection all use the true score, so shaping changes what the agent tries, never how it is judged. The settings are saved in the checkpoint's `meta.shaping`, and the log gets `sandRate`, `treeRate` (per stroke), `targetMiss` (share of tee holes worse than the target) and `shapedPenalty` (mean per stroke).
+
+Pick a target the agent can reach some of the time. The penalty teaches through the *difference* between holes that make it and holes that don't. At the default noise the fine-tuned agent misses −2 on about 96% of holes, so the penalty is nearly constant and mostly just lowers every value. With `--exact-solve`, eagles become common and −2 is a real target. Without it, −1 is the better choice. Very heavy penalties can also make it avoid risk. A tree penalty of 5, for example, may teach it to lay up rather than attack past trees.
 
 ## Reading the log
 

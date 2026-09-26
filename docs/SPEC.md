@@ -21,7 +21,7 @@ Any change to what `observe()` writes, or to what `decode()` means, must bump `O
 | Reset spec | `{seed, remix, hole, rngSeed, start?}`: the course seed, remix or classic, hole index 0–17, the seed for the instance's `Math.random` (wind and swing noise), and an optional `start: {u, v}` in [0,1)² |
 | Exploring start | Drop the ball at fraction `u` along the centreline, `(2v−1)·60` yards across it. The offset shrinks toward the centreline until the spot is not water or OB. |
 | Termination | Holed, or `strokes >= par + maxOver` (default 5, the game's mercy rule). A penalty can push the final count to par+6, as it can in the game. |
-| Reward | −1 per stroke, and −1 more for each water or OB penalty. The undiscounted return is minus the hole score. There is no bonus for using the solver or for holing from far: the solver pays off only through strokes saved. |
+| Reward | −1 per stroke, and −1 more for each water or OB penalty. The undiscounted return is minus the hole score. There is no bonus for using the solver or for holing from far: the solver pays off only through strokes saved. Optional penalty shaping (sand, trees, a target score) is added by the Python trainer, not the env (see TRAINING.md). |
 
 The rules follow `Golf13K/game/game.js`:
 

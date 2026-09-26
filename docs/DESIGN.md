@@ -30,7 +30,7 @@ It is faster than the JS without changing a result. The value-noise lattice hash
 
 ## Problem framing
 
-- **One episode per hole, one step per stroke.** Holes are short: about 4 steps, and at most par+5 plus a penalty. The reward is −1 per stroke plus penalties, with γ = 1, so the return is exactly minus the score. There is no reward shaping. The critic learns expected strokes-to-hole from the state, which is the natural value function of golf.
+- **One episode per hole, one step per stroke.** Holes are short: about 4 steps, and at most par+5 plus a penalty. The reward is −1 per stroke plus penalties, with γ = 1, so the return is exactly minus the score. There is no reward shaping by default. Optional penalties for sand, trees and missing a target score (`py/golfrl/shaping.py`) are trainer-side and off unless asked for, and evaluation and checkpoint selection always use the true score. The critic learns expected strokes-to-hole from the state, which is the natural value function of golf.
 - **Procedural training distribution.** Every training episode is a random hole of a random remix course, and there are about 2M × 18 layouts. The classic course and the low remix seeds are held out, so eval numbers measure generalisation, not memorisation.
 
 ## Action parameterisation

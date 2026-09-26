@@ -15,7 +15,7 @@ use crate::jsmath::Mulberry32;
 use crate::obs::{is_stuck, Action, N_CLUB_ACTIONS, OBS_DIM, OBS_VERSION};
 use rayon::prelude::*;
 
-pub const INFO_W: usize = 18;
+pub const INFO_W: usize = 20;
 pub const I_REWARD: usize = 0;
 pub const I_DONE: usize = 1;
 pub const I_RESULT: usize = 2; // RES_*: holed, stopped, water, ob
@@ -34,6 +34,8 @@ pub const I_TO: usize = 14;
 pub const I_TREE: usize = 15;
 pub const I_SOLVED: usize = 16; // the shot played was the solver's (CLUB_SOLVE with a solution)
 pub const I_IMPACT: usize = 17; // the impact swung for (before the swing noise)
+pub const I_REST: usize = 18; // SURF_* the ball came to rest on (after any penalty drop)
+pub const I_TEE: usize = 19; // the episode started on the tee (not an exploring start)
 
 struct Slot {
     env: GolfEnv,
@@ -77,6 +79,8 @@ impl Slot {
         info[I_TREE] = l.tree as u8 as f64;
         info[I_SOLVED] = l.solved as u8 as f64;
         info[I_IMPACT] = l.impact;
+        info[I_REST] = e.g.ball_ground().s as f64;
+        info[I_TEE] = e.spec.start.is_none() as u8 as f64;
         if !r.done {
             info[I_STUCK] = is_stuck(&e.prev, l.club == crate::game::CLUB_PUTTER) as u8 as f64;
             self.env.observe(obs);

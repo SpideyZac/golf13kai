@@ -17,6 +17,8 @@ REWARD, DONE, RESULT, STROKES, PAR, PENALTIES, HOLED, STUCK = range(8)
 CLUB, SPIN, LIE, FROM, WANT, POWER, TO, TREE = range(8, 16)
 SOLVED = 16  # the shot played was the solver's (CLUB_SOLVE with a solution)
 IMPACT = 17  # the meter impact swung for (+ early, - late), before the swing noise
+REST = 18    # the LIES index the ball came to rest on (after any penalty drop)
+TEE = 19     # the episode started on the tee (not an exploring start)
 RESULTS = ['holed', 'stopped', 'water', 'ob']
 LIES = ['ROUGH', 'FAIRWAY', 'GREEN', 'TEE', 'SAND', 'WATER', 'OB']
 CLUB_NAMES = ['1W', '3W', '5W', '3i', '5i', '7i', '9i', '13i', 'PW', 'SW', 'PT']
@@ -55,7 +57,7 @@ _lib = _load()
 OBS_VERSION = _lib.gs_obs_version()
 OBS_DIM = _lib.gs_obs_dim()
 INFO_W = _lib.gs_info_width()
-if INFO_W <= IMPACT:
+if INFO_W <= TEE:
     raise ImportError(f'{_lib_path()} is out of date (info width {INFO_W}): npm run build:sim')
 
 
