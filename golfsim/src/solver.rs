@@ -16,17 +16,31 @@ const PERFECT: f64 = 0.02;
 const SW: usize = 9;
 /// the fallback searches this many clubs either side of the game's
 const FALLBACK_CLUBS: usize = 2;
+/// the fallback's shaped swings: the impact swung for (+ early, - late)
+const CURVES: [f64; 4] = [-0.12, -0.06, 0.06, 0.12];
 
 const PI: f64 = std::f64::consts::PI;
 const TAU: f64 = 2.0 * std::f64::consts::PI;
 
-/// Solver.solve's result. `spin` is the launch spin (-1 back, 0 none).
+/// the impact launchBall actually plays
+#[inline]
+fn snap(e: f64) -> f64 {
+    if e.abs() < PERFECT {
+        0.0
+    } else {
+        e
+    }
+}
+
+/// Solver.solve's result. `spin` is the launch spin (-1 back, 0 none, 1 top),
+/// `impact` the meter impact swung for.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Solution {
     pub tried: bool,
     pub found: bool,
     pub club: usize,
     pub spin: f64,
+    pub impact: f64,
     pub yaw: f64,
     pub power: f64,
     pub lm: f64,
@@ -63,28 +77,19 @@ fn trial(g: &mut Game, club: usize, spin: f64, yaw: f64, power: f64, lm: f64, im
     r
 }
 
-/// noiseSamples: (impact, aim error, weight)
-fn noise_samples(impact_noise: f64, aim_noise: f64, putt: bool) -> Vec<(f64, f64, f64)> {
-    let mut imp = Vec::with_capacity(3);
-    if impact_noise <= PERFECT {
-        imp.push((0.0, 1.0));
+/// quarter centres of a uniform +-n, or a single 0 sample when n <= 0
+fn quarters(n: f64) -> Vec<(f64, f64)> {
+    if n > 0.0 {
+        vec![(-n * 0.75, 0.25), (-n * 0.25, 0.25), (n * 0.25, 0.25), (n * 0.75, 0.25)]
     } else {
-        let pp = PERFECT / impact_noise;
-        let e = PERFECT + (impact_noise - PERFECT) * 0.5;
-        imp.push((0.0, pp));
-        imp.push((-e, (1.0 - pp) / 2.0));
-        imp.push((e, (1.0 - pp) / 2.0));
-    }
-    let aim: Vec<(f64, f64)> = if putt || aim_noise <= 0.0 {
         vec![(0.0, 1.0)]
-    } else {
-        vec![
-            (-aim_noise * 0.75, 0.25),
-            (-aim_noise * 0.25, 0.25),
-            (aim_noise * 0.25, 0.25),
-            (aim_noise * 0.75, 0.25),
-        ]
-    };
+    }
+}
+
+/// noiseSamples: (impact error, aim error, weight)
+fn noise_samples(impact_noise: f64, aim_noise: f64, putt: bool) -> Vec<(f64, f64, f64)> {
+    let imp = quarters(impact_noise);
+    let aim = if putt { vec![(0.0, 1.0)] } else { quarters(aim_noise) };
     let mut out = Vec::with_capacity(imp.len() * aim.len());
     for &(i, wi) in &imp {
         for &(a, wa) in &aim {
@@ -94,11 +99,11 @@ fn noise_samples(impact_noise: f64, aim_noise: f64, putt: bool) -> Vec<(f64, f64
     out
 }
 
-/// Solver.candidates: (club, spin) pairs worth solving from here.
-fn candidates(auto: usize, lie: u8, d: f64) -> Vec<(usize, f64)> {
+/// Solver.candidates: (club, spin, impact) swings worth solving from here.
+fn candidates(auto: usize, lie: u8, d: f64) -> Vec<(usize, f64, f64)> {
     let mut c = Vec::with_capacity(3);
     if d < PUTT_MAX && (lie == SURF_GREEN || lie == SURF_FAIRWAY || lie == SURF_TEE) {
-        c.push((CLUB_PUTTER, 0.0));
+        c.push((CLUB_PUTTER, 0.0, 0.0));
     }
     let full = if auto == CLUB_PUTTER {
         if lie == SURF_GREEN {
@@ -110,30 +115,42 @@ fn candidates(auto: usize, lie: u8, d: f64) -> Vec<(usize, f64)> {
         Some(auto)
     };
     if let Some(f) = full {
-        c.push((f, 0.0));
-        c.push((f, -1.0));
+        c.push((f, 0.0, 0.0));
+        c.push((f, -1.0, 0.0));
     }
     c
 }
 
 /// Solver.fallback: when no candidate holes, the clubs up to FALLBACK_CLUBS
-/// either side of the game's (the wedge's, when it handed over the putter),
-/// longest first, each with no spin, backspin and topspin.
-fn fallback(auto: usize, tried: &[(usize, f64)]) -> Vec<(usize, f64)> {
+/// either side of the game's, longest first: straight with no spin, backspin
+/// and topspin, then hooked and sliced (CURVES) with no spin and backspin.
+fn fallback(auto: usize, tried: &[(usize, f64, f64)]) -> Vec<(usize, f64, f64)> {
     let base = if auto == CLUB_PUTTER { SW } else { auto };
+    let (lo, hi) = (base.saturating_sub(FALLBACK_CLUBS), (base + FALLBACK_CLUBS).min(SW));
     let mut c = Vec::new();
-    for k in base.saturating_sub(FALLBACK_CLUBS)..=(base + FALLBACK_CLUBS).min(SW) {
+    let mut add = |k: usize, spin: f64, imp: f64| {
+        if !tried.iter().any(|&(tc, ts, ti)| tc == k && ts == spin && ti == imp) {
+            c.push((k, spin, imp));
+        }
+    };
+    for k in lo..=hi {
         for spin in [0.0, -1.0, 1.0] {
-            if !tried.iter().any(|&(tc, ts)| tc == k && ts == spin) {
-                c.push((k, spin));
+            add(k, spin, 0.0);
+        }
+    }
+    for k in lo..=hi {
+        for spin in [0.0, -1.0] {
+            for imp in CURVES {
+                add(k, spin, imp);
             }
         }
     }
     c
 }
 
-/// Solver.steer: (yaw, power, want) of a swing of (club, spin) that holes.
-fn steer(g: &mut Game, club: usize, spin: f64, d: f64, pdir: f64, pin_out: bool) -> Option<(f64, f64, f64)> {
+/// Solver.steer: (yaw, power, want) of a swing of (club, spin, impact) that holes.
+#[allow(clippy::too_many_arguments)]
+fn steer(g: &mut Game, club: usize, spin: f64, impact: f64, d: f64, pdir: f64, pin_out: bool) -> Option<(f64, f64, f64)> {
     let (bx, bz) = (g.ball.x, g.ball.z);
     let putt = club == CLUB_PUTTER;
     let lm = g.lie_mul(club);
@@ -142,7 +159,7 @@ fn steer(g: &mut Game, club: usize, spin: f64, d: f64, pdir: f64, pin_out: bool)
     let (mut yaw, mut want) = (pdir, d);
     for _ in 0..SOLVE_ITERS {
         let power = js_min(js_max(want / max, lo), 1.0);
-        let r = trial(g, club, spin, yaw, power, lm, 0.0, 0.0, pin_out);
+        let r = trial(g, club, spin, yaw, power, lm, impact, 0.0, pin_out);
         if r.ev == EV_HOLED {
             return Some((yaw, power, want));
         }
@@ -190,20 +207,31 @@ pub fn solve(g: &mut Game, impact_noise: f64, aim_noise: f64) -> Solution {
     let fb = fallback(auto, &cands);
     // every candidate is solved and the best odds win; the fallback stops at
     // its first solution
-    for (pass, (club, spin)) in cands.iter().map(|&c| (0, c)).chain(fb.into_iter().map(|c| (1, c))) {
+    for (pass, (club, spin, impact)) in cands.iter().map(|&c| (0, c)).chain(fb.into_iter().map(|c| (1, c))) {
         if pass == 1 && best.found {
             break;
         }
         let putt = club == CLUB_PUTTER;
         let lm = g.lie_mul(club);
-        let Some((hy, hp, hw)) = steer(g, club, spin, d, pdir, pin_out) else { continue };
+        let Some((hy, hp, hw)) = steer(g, club, spin, impact, d, pdir, pin_out) else { continue };
         let (mut p_hole, mut p_hazard, mut leave) = (0.0, 0.0, 0.0);
+        // samples that snap to the same strike play the same shot: one trial each
+        let mut seen: Vec<(f64, f64, u8, f64, f64)> = Vec::new();
         for (imp, aim, w) in noise_samples(impact_noise, aim_noise, putt) {
-            if imp == 0.0 && aim == 0.0 {
+            // the swing that plays exactly as the solution drops
+            if snap(impact + imp) == snap(impact) && aim == 0.0 {
                 p_hole += w;
                 continue;
             }
-            let r = trial(g, club, spin, hy, hp, lm, imp, aim, pin_out);
+            let e = snap(impact + imp);
+            let r = match seen.iter().find(|q| q.0 == e && q.1 == aim) {
+                Some(q) => Trial { ev: q.2, x: q.3, z: q.4 },
+                None => {
+                    let r = trial(g, club, spin, hy, hp, lm, impact + imp, aim, pin_out);
+                    seen.push((e, aim, r.ev, r.x, r.z));
+                    r
+                }
+            };
             if r.ev == EV_HOLED {
                 p_hole += w;
             } else {
@@ -219,6 +247,7 @@ pub fn solve(g: &mut Game, impact_noise: f64, aim_noise: f64) -> Solution {
                 found: true,
                 club,
                 spin,
+                impact,
                 yaw: hy,
                 power: hp,
                 lm,

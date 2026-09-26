@@ -57,7 +57,7 @@ The agent observes what a player sees, in a frame pointed at the pin:
 
 When the pin is in range, a solver plays trial shots through the real physics until it finds the swing that holes, wind included, and works out how often that swing drops given the swing-meter error. The agent sees those odds and can choose `SOLVE` to play the solver's swing, so its own job becomes strategy: when to go for it, and where to leave the ball so the next one is makeable.
 
-For everything else it acts residually to the obvious shot. `aim = 0, dist = 0` means "at the pin, exactly that far", and it learns the wind, lay-ups, doglegs and break on top of that. Every swing goes through the game's `launchBall` with the same timing error the game's bot is given.
+For everything else it acts residually to the obvious shot, and it chooses the swing-meter impact too, so it can hook or slice (the solver curves shots around trees the same way). `aim = 0, dist = 0` means "at the pin, exactly that far", and it learns the wind, lay-ups, doglegs and break on top of that. Every swing goes through the game's `launchBall` with the same timing error the game's bot is given.
 
 See [docs/SPEC.md](docs/SPEC.md) for the environment contract, [docs/DESIGN.md](docs/DESIGN.md) for the reasoning, and [docs/TRAINING.md](docs/TRAINING.md) for how to train and the results log.
 

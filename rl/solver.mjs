@@ -21,8 +21,15 @@ const PERFECT = .02;
 const SW = 9;
 // the fallback searches this many clubs either side of the game's (see fallback())
 const FALLBACK_CLUBS = 2;
+// the fallback's shaped swings: the impact swung for (+ early, - late), which
+// curves the flight (launchBall's ballCurve = impact*22) around what blocks
+// the straight line
+const CURVES = [-.12, -.06, .06, .12];
 
 const TAU = 2*Math.PI;
+
+// the impact launchBall actually plays
+const snap = (e)=> Math.abs(e) < PERFECT ? 0 : e;
 
 // Every global a shot writes (launchBall, shotBegin, ballUpdate, flyStep, rollStep).
 function save(G)
@@ -44,23 +51,17 @@ function restore(G, s)
     G.rollRest = s.rollRest;
 }
 
-// The swing-meter noise as a few weighted samples. Impact: uniform +-n, with
-// |err| < .02 snapping to perfect, so P(perfect) = .02/n and a miss either
-// side sits at the middle of [.02, n]. Aim (full swings only): uniform +-a,
-// as the centres of its quarters. No aim sample is 0: that one is the
-// solution itself and always drops, which would credit a 150-yard iron with
-// a third of a chance. Putts have no aim noise, so a perfect putt does drop.
+// The swing-meter noise as weighted samples [impact error, aim error, weight]:
+// each uniform on +-n, as the centres of its quarters. The impact error adds
+// to the impact swung for, and the sum snaps to perfect under .02, so from a
+// straight swing (impact 0) the two inner samples ARE the perfect strike,
+// half the weight at the default noise. No aim sample is 0: that one is the
+// solution itself and always drops, which would credit a 150-yard iron with a
+// third of a chance. Putts have no aim noise.
 function noiseSamples(impactNoise, aimNoise, putt)
 {
-    const imp = [];
-    if (impactNoise <= PERFECT) imp.push([0, 1]);
-    else
-    {
-        const pp = PERFECT/impactNoise, e = PERFECT + (impactNoise - PERFECT)*.5;
-        imp.push([0, pp], [-e, (1 - pp)/2], [e, (1 - pp)/2]);
-    }
-    const aim = putt || aimNoise <= 0 ? [[0, 1]]
-        : [[-aimNoise*.75, .25], [-aimNoise*.25, .25], [aimNoise*.25, .25], [aimNoise*.75, .25]];
+    const q = (n)=> n > 0 ? [[-n*.75, .25], [-n*.25, .25], [n*.25, .25], [n*.75, .25]] : [[0, 1]];
+    const imp = q(impactNoise), aim = putt ? [[0, 1]] : q(aimNoise);
     const out = [];
     for (const [i, wi] of imp)
         for (const [a, wa] of aim)
@@ -87,36 +88,44 @@ export class Solver
         return r;
     }
 
-    // The swings worth solving from here: the putter where it can roll there,
-    // and the game's own club with no spin and with backspin (or, when the
-    // game hands over the putter off the green, a sand wedge chip).
+    // The swings worth solving from here, as [club, spin, impact]: the putter
+    // where it can roll there, and the game's own club with no spin and with
+    // backspin (or, when the game hands over the putter off the green, a sand
+    // wedge chip), all struck straight.
     candidates(auto, lie, d)
     {
         const G = this.G, c = [];
         if (d < G.PUTT_MAX && (lie == G.SURF_GREEN || lie == G.SURF_FAIRWAY || lie == G.SURF_TEE))
-            c.push([G.CLUB_PUTTER, 0]);
+            c.push([G.CLUB_PUTTER, 0, 0]);
         const full = auto == G.CLUB_PUTTER ? (lie == G.SURF_GREEN ? -1 : SW) : auto;
-        if (full >= 0) c.push([full, 0], [full, -1]);
+        if (full >= 0) c.push([full, 0, 0], [full, -1, 0]);
         return c;
     }
 
     // When none of those holes: the clubs up to FALLBACK_CLUBS either side of
-    // the game's (the wedge's, when it handed over the putter), longest first,
-    // each with no spin, backspin and topspin - a longer club or topspin for a
-    // pin the game's club cannot run up to, a shorter one to stop on a ridge.
-    // Measured: 82% -> 86% of in-range lies solved, for ~50% more trials.
+    // the game's (the wedge's, when it handed over the putter), longest first.
+    // First straight with no spin, backspin and topspin - a longer club or
+    // topspin for a pin the game's club cannot run up to, a shorter one to
+    // stop on a ridge - then hooked and sliced (CURVES) with no spin and
+    // backspin, to bend around a tree on the line.
+    // Measured on in-range lies: 82% -> 86% solved straight, 90% with curves.
     fallback(auto, tried)
     {
         const G = this.G, c = [], base = auto == G.CLUB_PUTTER ? SW : auto;
-        for (let k = Math.max(0, base - FALLBACK_CLUBS); k <= Math.min(SW, base + FALLBACK_CLUBS); ++k)
-            for (const spin of [0, -1, 1])
-                if (!tried.some(([tc, ts])=> tc == k && ts == spin)) c.push([k, spin]);
+        const lo = Math.max(0, base - FALLBACK_CLUBS), hi = Math.min(SW, base + FALLBACK_CLUBS);
+        const add = (k, spin, imp)=>
+            tried.some(([tc, ts, ti])=> tc == k && ts == spin && ti == imp) || c.push([k, spin, imp]);
+        for (let k = lo; k <= hi; ++k)
+            for (const spin of [0, -1, 1]) add(k, spin, 0);
+        for (let k = lo; k <= hi; ++k)
+            for (const spin of [0, -1])
+                for (const imp of CURVES) add(k, spin, imp);
         return c;
     }
 
-    // Steer one (club, spin) onto the cup: {yaw, power, want} of a holing
-    // swing, or null.
-    steer(club, spin, d, pdir, pinOut)
+    // Steer one (club, spin, impact) onto the cup: {yaw, power, want} of a
+    // holing swing, or null.
+    steer(club, spin, impact, d, pdir, pinOut)
     {
         const G = this.G, b = G.ball, putt = club == G.CLUB_PUTTER;
         const lm = G.lieMul(club), max = putt ? G.PUTT_MAX : G.CLUBS[club][1]*lm;
@@ -125,7 +134,7 @@ export class Solver
         for (let k = 0; k < SOLVE_ITERS; ++k)
         {
             const power = Math.min(Math.max(want/max, lo), 1);
-            const r = this.trial(club, spin, yaw, power, lm, 0, 0, pinOut);
+            const r = this.trial(club, spin, yaw, power, lm, impact, 0, pinOut);
             if (r.ev == G.EV_HOLED) return {yaw, power, want};
             const dx = r.x - b.x, dz = r.z - b.z, got = Math.hypot(dx, dz);
             // it went nowhere (a tree, a wall), or it cannot get there at full power
@@ -141,7 +150,7 @@ export class Solver
     }
 
     // Solve the current lie. cfg: {impactNoise, aimNoise}. Returns
-    // {tried, found, club, spin, yaw, power, lm, want, pHole, pHazard, leave}.
+    // {tried, found, club, spin, impact, yaw, power, lm, want, pHole, pHazard, leave}.
     solve({impactNoise, aimNoise})
     {
         const G = this.G, b = G.ball, px = G.hole.pin.x, pz = G.hole.pin.z;
@@ -157,18 +166,27 @@ export class Solver
         // every candidate is solved and the best odds win; the fallback stops
         // at its first solution
         for (const pass of [0, 1])
-        for (const [club, spin] of pass ? this.fallback(auto, cands) : cands)
+        for (const [club, spin, impact] of pass ? this.fallback(auto, cands) : cands)
         {
             if (pass && best.found) break;
             const putt = club == G.CLUB_PUTTER, lm = G.lieMul(club);
-            const hit = this.steer(club, spin, d, pdir, pinOut);
+            const hit = this.steer(club, spin, impact, d, pdir, pinOut);
             if (!hit) continue;
             // the solution across the swing noise
             let pHole = 0, pHazard = 0, leave = 0;
+            // samples that snap to the same strike play the same shot: one trial each
+            const seen = [];
             for (const [imp, aim, w] of noiseSamples(impactNoise, aimNoise, putt))
             {
-                if (imp == 0 && aim == 0) { pHole += w; continue; }  // the solution itself
-                const r = this.trial(club, spin, hit.yaw, hit.power, lm, imp, aim, pinOut);
+                // the swing that plays exactly as the solution drops
+                if (snap(impact + imp) == snap(impact) && aim == 0) { pHole += w; continue; }
+                const e = snap(impact + imp);
+                let r = seen.find(q => q.e == e && q.aim == aim)?.r;
+                if (!r)
+                {
+                    r = this.trial(club, spin, hit.yaw, hit.power, lm, impact + imp, aim, pinOut);
+                    seen.push({e, aim, r});
+                }
                 if (r.ev == G.EV_HOLED) pHole += w;
                 else
                 {
@@ -177,7 +195,7 @@ export class Solver
                 }
             }
             if (!best.found || pHole > best.pHole || (pHole == best.pHole && leave < best.leave))
-                best = {tried: 1, found: 1, club, spin, yaw: hit.yaw, power: hit.power, lm, want: hit.want,
+                best = {tried: 1, found: 1, club, spin, impact, yaw: hit.yaw, power: hit.power, lm, want: hit.want,
                     pHole, pHazard, leave};
         }
         return best;

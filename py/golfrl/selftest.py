@@ -68,7 +68,7 @@ def main():
             out, _ = model(torch.from_numpy(env.obs))
             c, s, k = sample(out)
             k = k.double().numpy()
-            env.step(c.numpy(), s.numpy(), k[:, 0], k[:, 1])
+            env.step(c.numpy(), s.numpy(), k[:, 0], k[:, 1], k[:, 2])
             obs.append(env.obs.copy())
     env.close()
     X = torch.from_numpy(np.concatenate(obs))
@@ -76,7 +76,7 @@ def main():
         out, val = model(X)
         club, spin, cont = sample(out)
         lp = log_prob(out, club, spin, cont)
-    acts = [{'club': int(c), 'spin': int(s), 'aim': float(k[0]), 'dist': float(k[1])}
+    acts = [{'club': int(c), 'spin': int(s), 'aim': float(k[0]), 'dist': float(k[1]), 'impact': float(k[2])}
             for c, s, k in zip(club, spin, cont)]
     js = run_node({'file': str(agent), 'obs': X.tolist(), 'acts': acts})
     d_out = np.abs(np.array(js['out']) - out.numpy()).max()

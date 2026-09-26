@@ -1,14 +1,15 @@
 """The agent in PyTorch: the same networks and action distribution as
 rl/policy.mjs, so that a checkpoint trained here plays in the browser.
 
-Actor output (HEAD = 19): club logits [0:12] (the 11 clubs, then CLUB_SOLVE,
-the solver's shot), spin logits [12:15], Gaussian means of (aim, dist)
-[15:17], their log stds [17:19] clamped to [LS_MIN, LS_MAX]. The critic is a
-separate MLP. Hidden layers are tanh.
+Actor output (HEAD = 21): club logits [0:12] (the 11 clubs, then CLUB_SOLVE,
+the solver's shot), spin logits [12:15], Gaussian means of (aim, dist,
+impact) [15:18], their log stds [18:21] clamped to [LS_MIN, LS_MAX]. The
+critic is a separate MLP. Hidden layers are tanh.
 
-A v3 checkpoint (before the solver) upgrades to v4 losslessly: zero weights
-for the new observation inputs and a SOLVE logit with zero weights and a
-chosen bias (upgrade_v3, and python -m golfrl.upgrade).
+A v3 checkpoint (before the solver and the impact) upgrades to v5 losslessly:
+zero weights for the new observation inputs, a SOLVE logit with zero weights
+and a chosen bias, and an impact head with zero weights (mean 0: a straight
+swing) and a narrow std (upgrade_v3, and python -m golfrl.upgrade).
 
 Checkpoints use the JS format (rl/checkpoint.mjs): the parameters as ONE flat
 float32 array in the JS layout - per layer W as [in][out] then b, actor first,
@@ -25,10 +26,14 @@ from torch import nn
 
 from .sim import OBS_DIM, OBS_VERSION, N_CLUB_ACTIONS as N_CLUBS, CLUB_SOLVE, N_SPIN
 
-HEAD = N_CLUBS + N_SPIN + 4
-C0, S0, MU, LS = 0, N_CLUBS, N_CLUBS + N_SPIN, N_CLUBS + N_SPIN + 2
+N_CONT = 3      # the continuous action: aim, dist, impact
+HEAD = N_CLUBS + N_SPIN + 2 * N_CONT
+C0, S0, MU, LS = 0, N_CLUBS, N_CLUBS + N_SPIN, N_CLUBS + N_SPIN + N_CONT
 LS_MIN, LS_MAX = -6., 1.
-LS_INIT = -.7   # initial log std of (aim, dist)
+LS_INIT = -.7   # initial log std of (aim, dist, impact)
+# the upgraded impact head's log std: raw std .37, so impact std ~.018, which
+# keeps most of the old agent's swings inside the game's perfect-strike snap
+UPGRADE_IMPACT_LS = -1.
 V_BIAS = -4.    # critic output offset: returns are about -4 strokes a hole
 LOG2PI = math.log(2 * math.pi)
 DEFAULT_HIDDEN = [256, 128]
@@ -69,7 +74,7 @@ class Model(nn.Module):
                 gain = out_gain if i == len(lin) - 1 else 1.
                 m.weight.copy_(torch.randn(m.weight.shape, generator=g) * gain / math.sqrt(m.in_features))
                 m.bias.zero_()
-        self.actor[-1].bias[LS:LS + 2] = LS_INIT
+        self.actor[-1].bias[LS:LS + N_CONT] = LS_INIT
         self.critic[-1].bias[0] = V_BIAS
         return self
 
@@ -112,16 +117,18 @@ def save_js(path, model, meta):
 
 
 # v3 (before the solver): 6 fewer observation floats (the solver block is the
-# last one) and no SOLVE logit
-V3_OBS_DIM, V3_HEAD = OBS_DIM - 6, HEAD - 1
+# last one), no SOLVE logit and no impact head
+V3_OBS_DIM, V3_HEAD = OBS_DIM - 6, HEAD - 3
 
 
 def upgrade_v3(flat, hidden, solve_logit):
-    """A v3 flat parameter array as v4: the new inputs get zero weights in
+    """A v3 flat parameter array as v5: the new inputs get zero weights in
     both first layers, and the actor gets a SOLVE logit at CLUB_SOLVE with zero
-    weights and bias `solve_logit`. Every old output is unchanged, so the
-    upgraded agent plays exactly as before while SOLVE is at -20; a higher bias
-    makes it try the solver's shot from the start."""
+    weights and bias `solve_logit`, and an impact mean (zero weights and bias:
+    a straight swing) and log std (bias UPGRADE_IMPACT_LS). Every old output
+    is unchanged, so with SOLVE at -20 the upgraded agent's mode plays as
+    before (its sampled swings add a small impact spread); a higher bias makes
+    it try the solver's shot from the start."""
     flat = np.asarray(flat, np.float32)
     out, o = [], 0
     for net_out in (V3_HEAD, 1):
@@ -135,8 +142,10 @@ def upgrade_v3(flat, hidden, solve_logit):
             if li == 0:
                 W = np.concatenate([W, np.zeros((OBS_DIM - V3_OBS_DIM, k), np.float32)])
             if net_out == V3_HEAD and li == len(sizes) - 2:
-                W = np.insert(W, CLUB_SOLVE, 0., axis=1)
-                b = np.insert(b, CLUB_SOLVE, solve_logit)
+                # SOLVE, then the impact's mean after (aim, dist), then its log std
+                for at, bias in ((CLUB_SOLVE, solve_logit), (MU + 2, 0.), (LS + 2, UPGRADE_IMPACT_LS)):
+                    W = np.insert(W, at, 0., axis=1)
+                    b = np.insert(b, at, bias)
             out += [W.ravel(), b]
     if o != flat.size:
         raise ValueError(f'v3 checkpoint has {flat.size} params, expected {o}')
@@ -160,12 +169,12 @@ def load_js(path, upgrade_solve_logit=None):
 # ---- the hybrid action distribution (rl/policy.mjs) ----
 
 def split(out):
-    ls = out[:, LS:LS + 2].clamp(LS_MIN, LS_MAX)
-    return out[:, C0:C0 + N_CLUBS], out[:, S0:S0 + N_SPIN], out[:, MU:MU + 2], ls
+    ls = out[:, LS:LS + N_CONT].clamp(LS_MIN, LS_MAX)
+    return out[:, C0:C0 + N_CLUBS], out[:, S0:S0 + N_SPIN], out[:, MU:MU + N_CONT], ls
 
 
 def sample(out, deterministic=None):
-    """Actions (club, spin, cont[:, (aim, dist)]) for a batch of actor rows.
+    """Actions (club, spin, cont[:, (aim, dist, impact)]) for a batch of actor rows.
     deterministic: None (sample all), True (all modes), or a bool mask of the
     rows to take the mode for."""
     club_l, spin_l, mu, ls = split(out)

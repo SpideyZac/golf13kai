@@ -38,7 +38,7 @@ test('PPO row gradient matches finite differences of the surrogate', ()=>
     const hp = {clip: .2, entCat: .05, entCont: .01};
     const rand = mulberry32(7), randn = randnFrom(rand);
     const out = Float32Array.from({length: HEAD}, ()=> randn()*.5);
-    const act = {club: 3, spin: 2, aim: .3, dist: -.4};
+    const act = {club: 3, spin: 2, aim: .3, dist: -.4, impact: .7};
     const oldLogp = logProb(out, 0, act) + .05, adv = 1.3;
     // the surrogate PPO minimises for this row (unclipped region), minus entropy
     const entropy = (o)=>
@@ -54,7 +54,7 @@ test('PPO row gradient matches finite differences of the surrogate', ()=>
         return H;
     };
     const f = (o)=> -Math.exp(logProb(o, 0, act) - oldLogp)*adv - hp.entCat*entropy(o)
-        - hp.entCont*(o[HEAD-2] + o[HEAD-1]);
+        - hp.entCont*(o[HEAD-3] + o[HEAD-2] + o[HEAD-1]);
     const d = new Float32Array(HEAD);
     ppoRowGrad(out, 0, act, oldLogp, adv, hp, 1, d);
     for (let i = 0; i < HEAD; ++i)

@@ -10,7 +10,7 @@
 //!    "cfg"?:{impactNoise,aimNoise,exactSolve}}
 //!       -> {obs, hole:{...}} (detail adds every prop: near [[x,z,s,y]...]);
 //!       cfg (optional) replaces the env's settings from here on
-//!   {"cmd":"step","action":{club,spin,aim,dist}}
+//!   {"cmd":"step","action":{club,spin,aim,dist,impact?}}
 //!       -> {reward, done, result, strokes, penalties, ball, prev, shot, obs|null}
 //!   {"cmd":"math","x":[..],"y":[..]} -> each jsmath function over x (and y)
 use golfsim::env::*;
@@ -89,6 +89,7 @@ fn serve() {
                     spin: a["spin"].as_u64().unwrap() as usize,
                     aim: a["aim"].as_f64().unwrap(),
                     dist: a["dist"].as_f64().unwrap(),
+                    impact: a["impact"].as_f64().unwrap_or(0.0),
                 };
                 let r = env.step(&act);
                 let l = *env.log.last().unwrap();
@@ -105,7 +106,7 @@ fn serve() {
                     "prev": [env.prev.moved, env.prev.tree as u8, env.prev.hazard as u8],
                     "shot": {"club": CLUBS[l.club].0, "spin": l.spin, "lie": SURF_NAMES[l.lie as usize],
                              "from": l.from, "want": l.want, "power": l.power, "to": l.to, "tree": l.tree as u8,
-                             "solved": l.solved as u8},
+                             "solved": l.solved as u8, "impact": l.impact},
                     "obs": obs,
                 })
             }
@@ -165,6 +166,7 @@ fn bench(holes: usize) {
                 spin: 1,
                 aim: 0.0,
                 dist: 0.0,
+                impact: 0.0,
             });
             t_step += t.elapsed().as_secs_f64();
             steps += 1;
@@ -198,6 +200,7 @@ fn bench(holes: usize) {
                 h,
                 club.as_ptr(),
                 spin.as_ptr(),
+                zero.as_ptr(),
                 zero.as_ptr(),
                 zero.as_ptr(),
                 std::ptr::null(),

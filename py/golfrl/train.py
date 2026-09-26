@@ -34,7 +34,7 @@ import torch
 
 from . import sim
 from .evaluate import play, summarise
-from .model import DEFAULT_HIDDEN, Model, entropies, load_js, log_prob, sample, save_js
+from .model import DEFAULT_HIDDEN, N_CONT, Model, entropies, load_js, log_prob, sample, save_js
 
 LOG_COLS = ['iter', 'steps', 'episodes', 'toPar', 'penalties', 'pickups', 'pl', 'vl', 'ent', 'kl', 'clipfrac',
             'gradNorm', 'lr', 'sps', 'evalClassic', 'evalRemix', 'solveRate', 'solveHoled', 'longHoleOuts']
@@ -137,7 +137,7 @@ def main(argv=None):
     buf_obs = torch.zeros((T, n, D), device=dev)
     buf_club = torch.zeros((T, n), dtype=torch.long, device=dev)
     buf_spin = torch.zeros((T, n), dtype=torch.long, device=dev)
-    buf_cont = torch.zeros((T, n, 2), device=dev)
+    buf_cont = torch.zeros((T, n, N_CONT), device=dev)
     buf_logp = torch.zeros((T, n), device=dev)
     buf_val = torch.zeros((T, n), device=dev)
     buf_rew = torch.zeros((T, n), device=dev)
@@ -173,7 +173,7 @@ def main(argv=None):
                 buf_logp[t] = log_prob(out, club, spin, cont)
                 buf_val[t] = v
                 c = cont.double().cpu().numpy()
-                o, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), c[:, 0], c[:, 1])
+                o, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), c[:, 0], c[:, 1], c[:, 2])
                 buf_rew[t] = torch.from_numpy(info[:, sim.REWARD]).to(dev)
                 buf_done[t] = torch.from_numpy(info[:, sim.DONE]).to(dev)
                 holed = info[:, sim.RESULT] == 0
@@ -201,7 +201,7 @@ def main(argv=None):
         model.train()
         B = n * T
         f_obs, f_club, f_spin = buf_obs.view(B, D), buf_club.view(B), buf_spin.view(B)
-        f_cont, f_logp, f_adv, f_ret = buf_cont.view(B, 2), buf_logp.view(B), adv.view(B), ret.view(B)
+        f_cont, f_logp, f_adv, f_ret = buf_cont.view(B, N_CONT), buf_logp.view(B), adv.view(B), ret.view(B)
         f_adv = (f_adv - f_adv.mean()) / (f_adv.std(unbiased=False) + 1e-8)
         st = collections.Counter()
         kl = gn = 0.

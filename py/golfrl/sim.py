@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REWARD, DONE, RESULT, STROKES, PAR, PENALTIES, HOLED, STUCK = range(8)
 CLUB, SPIN, LIE, FROM, WANT, POWER, TO, TREE = range(8, 16)
 SOLVED = 16  # the shot played was the solver's (CLUB_SOLVE with a solution)
+IMPACT = 17  # the meter impact swung for (+ early, - late), before the swing noise
 RESULTS = ['holed', 'stopped', 'water', 'ob']
 LIES = ['ROUGH', 'FAIRWAY', 'GREEN', 'TEE', 'SAND', 'WATER', 'OB']
 CLUB_NAMES = ['1W', '3W', '5W', '3i', '5i', '7i', '9i', '13i', 'PW', 'SW', 'PT']
@@ -46,7 +47,7 @@ def _load():
     lib.gs_vec_free.argtypes = [P]
     lib.gs_vec_reset_train.argtypes = [P, F]
     lib.gs_vec_reset_spec.argtypes = [P, U, D, U8, U, U, U8, D, D, F]
-    lib.gs_vec_step.argtypes = [P, F, F, F, F, F, U8, F, F]
+    lib.gs_vec_step.argtypes = [P, F, F, F, F, F, F, U8, F, F]
     return lib
 
 
@@ -54,7 +55,7 @@ _lib = _load()
 OBS_VERSION = _lib.gs_obs_version()
 OBS_DIM = _lib.gs_obs_dim()
 INFO_W = _lib.gs_info_width()
-if INFO_W <= SOLVED:
+if INFO_W <= IMPACT:
     raise ImportError(f'{_lib_path()} is out of date (info width {INFO_W}): npm run build:sim')
 
 
@@ -96,15 +97,17 @@ class VecEnv:
         row = self.obs[i]
         _lib.gs_vec_reset_spec(self._h, i, float(seed), int(remix), hole, rng_seed, start is not None, u, v, _ptr(row))
 
-    def step(self, club, spin, aim, dist, active=None, auto_reset=True):
-        """One stroke in every (active) env. With auto_reset, a finished env's
-        obs row is already its next episode's first observation."""
+    def step(self, club, spin, aim, dist, impact=None, active=None, auto_reset=True):
+        """One stroke in every (active) env; impact (raw, like aim and dist)
+        defaults to straight swings. With auto_reset, a finished env's obs row
+        is already its next episode's first observation."""
         club = np.ascontiguousarray(club, np.int32)
         spin = np.ascontiguousarray(spin, np.int32)
         aim = np.ascontiguousarray(aim, np.float64)
         dist = np.ascontiguousarray(dist, np.float64)
+        impact = np.zeros(self.n) if impact is None else np.ascontiguousarray(impact, np.float64)
         act = None if active is None else _ptr(np.ascontiguousarray(active, np.uint8))
-        _lib.gs_vec_step(self._h, _ptr(club), _ptr(spin), _ptr(aim), _ptr(dist), act, int(auto_reset),
+        _lib.gs_vec_step(self._h, _ptr(club), _ptr(spin), _ptr(aim), _ptr(dist), _ptr(impact), act, int(auto_reset),
                          _ptr(self.obs), _ptr(self.info))
         return self.obs, self.info
 

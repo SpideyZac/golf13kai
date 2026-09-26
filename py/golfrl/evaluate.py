@@ -39,7 +39,8 @@ def play(model, specs, device='cpu', deterministic=True, escape=False, shots=Fal
             det = torch.from_numpy(~stuck if escape else np.ones(n, bool)).to(device)
         club, spin, cont = sample(out, det)
         cont = cont.double().cpu().numpy()
-        _, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), cont[:, 0], cont[:, 1], active=~done, auto_reset=False)
+        _, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), cont[:, 0], cont[:, 1], cont[:, 2], active=~done,
+                           auto_reset=False)
         for i in np.flatnonzero(~done):
             r = info[i]
             if r[sim.SOLVED]:
@@ -49,7 +50,8 @@ def play(model, specs, device='cpu', deterministic=True, escape=False, shots=Fal
                 res[i]['shots'].append({
                     'club': sim.CLUB_NAMES[int(r[sim.CLUB])], 'spin': int(r[sim.SPIN]), 'lie': sim.LIES[int(r[sim.LIE])],
                     'from': r[sim.FROM], 'want': r[sim.WANT], 'result': sim.RESULTS[int(r[sim.RESULT])],
-                    'to': r[sim.TO], 'tree': bool(r[sim.TREE]), 'solved': bool(r[sim.SOLVED])})
+                    'to': r[sim.TO], 'tree': bool(r[sim.TREE]), 'solved': bool(r[sim.SOLVED]),
+                    'impact': r[sim.IMPACT]})
             stuck[i] = bool(r[sim.STUCK])
             if r[sim.DONE]:
                 done[i] = True
@@ -129,9 +131,10 @@ def main(argv=None):
                 print(f"  hole {e['hole'] + 1:2d} par {e['par']}: {e['strokes']}{pen}")
                 for sh in e['shots'] if a.shots else []:
                     spin = ['back', '    ', 'top '][sh['spin'] + 1]
+                    shape = f"  impact {sh['impact']:+.2f}" if abs(sh['impact']) >= .02 else ''
                     print(f"      {sh['club']:<3} {spin} from {sh['lie']:<7} {sh['from']:6.1f}yd  asked {sh['want']:6.1f}"
                           f" -> {sh['result']:<7} {sh['to']:6.1f}yd left{'  TREE' if sh['tree'] else ''}"
-                          f"{'  SOLVE' if sh['solved'] else ''}")
+                          f"{'  SOLVE' if sh['solved'] else ''}{shape}")
 
 
 if __name__ == '__main__':

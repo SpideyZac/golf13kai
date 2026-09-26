@@ -11,13 +11,13 @@ A reinforcement learning agent for **Sunshine Golf Classic**, Frank Force's JS13
   - `src/obs.rs`, `src/env.rs`, `src/solver.rs`: `rl/obs.mjs`, `rl/env.mjs` + `rl/courses.mjs`, and `rl/solver.mjs`.
   - `src/ffi.rs`: the batched, rayon-parallel C ABI Python uses (`info` columns `I_*`).
   - `src/bin/golfsim.rs`: `golfsim-cli serve` (JSON lines, for the parity test) and `bench`.
-- `py/golfrl/`: `sim.py` (ctypes `VecEnv`), `model.py` (the JS model in torch + JS checkpoint I/O + the v3→v4 upgrade), `train.py` (PPO), `evaluate.py`, `selftest.py`, `upgrade.py`.
+- `py/golfrl/`: `sim.py` (ctypes `VecEnv`), `model.py` (the JS model in torch + JS checkpoint I/O + the v3→v5 upgrade), `train.py` (PPO), `evaluate.py`, `selftest.py`, `upgrade.py`.
 - `rl/sim/loader.mjs`: concatenates `engineMath.js` + `course.js` + `golfSim.js` into an isolated closure per instance (the JS reference env).
 - `rl/sim/api.mjs`: `API_BODY`, the ONE list of game bindings (getters/setters), shared by the Node loader and the browser.
 - `rl/obs.mjs`: `Observer`, which holds the observation, the reference (the game's default shot) and action decoding. Pure, no Node imports, because the browser runs it. **Spec: `docs/SPEC.md`.**
 - `rl/solver.mjs`: the holing-shot solver `observe()` runs. It plays trial shots through the game's `launchBall`/`ballUpdate` and restores every flight global. `CLUB_SOLVE` (club 11) plays its shot.
 - `rl/env.mjs`: `GolfEnv`, where one episode is one hole and one step is one stroke. Also rules (penalty drop, pin, mercy) and exploring starts.
-- `rl/nn.mjs`, `rl/policy.mjs`: the MLP and the hybrid distribution the browser acts with (and the original Node trainer's backprop).
+- `rl/nn.mjs`, `rl/policy.mjs`: the MLP and the hybrid distribution the browser acts with (and the original Node trainer's backprop). The action is club (12 with SOLVE), spin, and three Gaussians: aim, dist, impact.
 - `rl/train.mjs`, `rl/worker.mjs`, `rl/pool.mjs`, `rl/eval.mjs`, `rl/baseline.mjs`: the original pure-Node trainer and tools. They still work, about 18× slower.
 - `rl/test/`: `grad.test.mjs` (finite differences), `env.test.mjs` (contract), `parity.test.mjs` (Rust vs JS, `===`).
 - `rl/web/`: `index.html` (the game's script list plus `ai.mjs`), `ai.mjs` (replaces the dev bot's global `botSwing`), `serve.mjs`, and `build.mjs` (everything, model included, inlined into one `build/index.html`).
@@ -34,7 +34,7 @@ cd py && python -m golfrl.selftest                  # torch net == browser net, 
 cd py && python -m golfrl.train --name r5 --iters 400 --lr 2.5e-4   # ~12 min on 16 CPU cores; GPU auto
 cd py && python -m golfrl.train --name solve1 --init ../models/agent.json --iters 300 --lr 1.5e-4   # fine-tune into the solver (v3 inits upgrade)
 cd py && python -m golfrl.train --name exact1 --init ../models/agent.json --exact-solve   # solver shots noise-free (always drop)
-cd py && python -m golfrl.upgrade ../models/agent.json   # v3 checkpoint -> v4, SOLVE never picked (plays as before)
+cd py && python -m golfrl.upgrade ../models/agent.json   # v3 checkpoint -> v5, SOLVE never picked, swings straight (plays as before)
 cd py && python -m golfrl.evaluate ../runs/r5/best.json --rounds 20 --escape
 npm run eval -- runs/r5/best.json --rounds 20 --escape   # the JS eval reads Python checkpoints too
 npm run baseline -- --rounds 20                     # default-shot + scripted bot references

@@ -99,11 +99,13 @@ python -m golfrl.evaluate ../runs/exact1/best.json --rounds 20 --escape   # uses
 
 The rules are saved in every checkpoint (`meta.env`). `golfrl.evaluate` (override with `--exact-solve`, `--noisy-solve`, `--no-solver`, `--impact-noise`, `--aim-noise`), `npm run eval` and the browser agent all play by them. Under `--exact-solve` the solver skips its noise replays, so the env is faster than with noisy solver shots.
 
-**Speed.** An in-range observation plays 10–60 trial shots. The env runs about 4.5× slower (about 5.8k strokes/s on 16 cores, against 27k), so on the CPU an iteration takes about 3 s instead of 1.4 s. `--no-solver` restores the old speed and behaviour.
+**Speed.** An in-range observation plays 10–60 trial shots. The env runs about 6× slower (about 4.2k strokes/s on 16 cores, against 27k), so on the CPU an iteration takes about 4 s instead of 1.4 s. `--no-solver` restores the old speed and behaviour.
 
 **Scores.** An agent that uses the solver knows the exact physics, so do not compare its scores with the scripted bot or the v3 rows below as like for like. Report it as its own row.
 
-**The shipped model** (`models/agent.json`) is r4 upgraded to v4 with the `SOLVE` bias at −20 (`python -m golfrl.upgrade`). It never picks `SOLVE` and plays exactly as before. Replace it with a solver-trained run once there is one.
+**Hooks and slices.** The agent also chooses the swing-meter impact it swings for (the third continuous action, see [SPEC.md](SPEC.md#action)), and the solver curves shots around trees. A shaped swing gives up the game's perfect-strike snap, so the agent has to learn when a curve is worth it. The upgraded head starts every swing straight, with a narrow spread.
+
+**The shipped model** (`models/agent.json`) is r4 upgraded to v5 with the `SOLVE` bias at −20 (`python -m golfrl.upgrade`). It never picks `SOLVE`, and its deterministic play (the mode swings straight) is exactly as before. Replace it with a solver-trained run once there is one.
 
 ## Reading the log
 

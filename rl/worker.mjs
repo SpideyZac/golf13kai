@@ -18,7 +18,7 @@ const rand = mulberry32(seed), randn = randnFrom(rand);
 
 // rollout storage
 let cap = 0, n = 0;
-let OBS, CLUB, SPIN, AIM, DIST, LOGP, VAL, ADV, RET;
+let OBS, CLUB, SPIN, AIM, DIST, IMPACT, LOGP, VAL, ADV, RET;
 function ensure(k)
 {
     if (k <= cap) return;
@@ -26,7 +26,7 @@ function ensure(k)
     const grow = (A, T, w = 1)=> { const B = new T(cap*w); A && B.set(A); return B; };
     OBS = grow(OBS, Float32Array, OBS_DIM);
     CLUB = grow(CLUB, Int8Array); SPIN = grow(SPIN, Int8Array);
-    AIM = grow(AIM, Float32Array); DIST = grow(DIST, Float32Array);
+    AIM = grow(AIM, Float32Array); DIST = grow(DIST, Float32Array); IMPACT = grow(IMPACT, Float32Array);
     LOGP = grow(LOGP, Float32Array); VAL = grow(VAL, Float32Array);
     ADV = grow(ADV, Float32Array); RET = grow(RET, Float32Array);
 }
@@ -45,7 +45,7 @@ function playEpisode(spec, deterministic, store, gamma, lambda, escape = false)
         {
             ensure(n+1);
             OBS.set(obs, n*OBS_DIM);
-            CLUB[n] = a.club; SPIN[n] = a.spin; AIM[n] = a.aim; DIST[n] = a.dist;
+            CLUB[n] = a.club; SPIN[n] = a.spin; AIM[n] = a.aim; DIST[n] = a.dist; IMPACT[n] = a.impact;
             LOGP[n] = a.logp; VAL[n] = a.value;
             ++n;
         }
@@ -118,7 +118,7 @@ const handlers =
         {
             const k = perm[lo+i];
             const adv = (ADV[k] - advMean)/(advStd + 1e-8);
-            const act = {club: CLUB[k], spin: SPIN[k], aim: AIM[k], dist: DIST[k]};
+            const act = {club: CLUB[k], spin: SPIN[k], aim: AIM[k], dist: DIST[k], impact: IMPACT[k]};
             const r = ppoRowGrad(out, i*HEAD, act, LOGP[k], adv, hp, 1, dOut);
             pl += -Math.min(r.ratio*adv, Math.min(Math.max(r.ratio, 1-hp.clip), 1+hp.clip)*adv);
             ent += r.ent;

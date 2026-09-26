@@ -1,21 +1,24 @@
 // The agent: an actor MLP producing a HYBRID action distribution and a
 // separate critic MLP, both over one flat parameter buffer.
 //
-// Actor output layout (HEAD = 19):
+// Actor output layout (HEAD = 21):
 //   [0..11]  club logits       categorical over the 11 clubs (10 = putter)
 //                              and 11 = CLUB_SOLVE, the solver's shot
 //   [12..14] spin logits       categorical back / none / top
-//   [15,16]  mu                Gaussian means of (aim, dist)
-//   [17,18]  log std           state dependent, clamped to [LS_MIN, LS_MAX]
+//   [15..17] mu                Gaussian means of (aim, dist, impact)
+//   [18..20] log std           state dependent, clamped to [LS_MIN, LS_MAX]
 import { MLP, randnFrom } from './nn.mjs';
 import { OBS_DIM, N_CLUB_ACTIONS as N_CLUBS, N_SPIN } from './obs.mjs';
 
-export const HEAD = N_CLUBS + N_SPIN + 4;
-const C0 = 0, S0 = N_CLUBS, MU = N_CLUBS + N_SPIN, LS = MU + 2;
+// the continuous action: aim, dist and the intended impact (hook/slice)
+export const N_CONT = 3;
+export const HEAD = N_CLUBS + N_SPIN + 2*N_CONT;
+const C0 = 0, S0 = N_CLUBS, MU = N_CLUBS + N_SPIN, LS = MU + N_CONT;
 export const LS_MIN = -6, LS_MAX = 1;
 const LOG2PI = Math.log(2*Math.PI);
-// initial log std of (aim, dist): wide enough to explore doglegs and layups
-const LS_INIT = [-.7, -.7];
+// initial log std of (aim, dist, impact): wide enough to explore doglegs and
+// layups; the impact's keeps most swings inside the game's perfect-strike snap
+const LS_INIT = [-.7, -.7, -.7];
 // critic output offset: returns are about -4 strokes a hole
 const V_BIAS = -4;
 
@@ -47,7 +50,7 @@ export class Model
         this.actor.init(randn, 1, .01);
         this.critic.init(randn, 1, 1);
         const ab = this.actor.layers.at(-1).b;
-        ab[LS] = LS_INIT[0]; ab[LS+1] = LS_INIT[1];
+        for (let d = 0; d < N_CONT; ++d) ab[LS+d] = LS_INIT[d];
         this.critic.layers.at(-1).b[0] = V_BIAS;
         return this;
     }
@@ -60,10 +63,10 @@ export class Model
         const value = this.critic.forward(obs, 1)[0];
         const club = deterministic ? argmax(out, C0, N_CLUBS) : sampleCat(out, C0, N_CLUBS, rand);
         const spin = deterministic ? argmax(out, S0, N_SPIN) : sampleCat(out, S0, N_SPIN, rand);
-        const a = [0, 0];
-        for (let d = 0; d < 2; ++d)
+        const a = [0, 0, 0];
+        for (let d = 0; d < N_CONT; ++d)
             a[d] = out[MU+d] + (deterministic ? 0 : Math.exp(clampLS(out[LS+d]))*randn());
-        const act = {club, spin, aim: a[0], dist: a[1]};
+        const act = {club, spin, aim: a[0], dist: a[1], impact: a[2]};
         act.logp = logProb(out, 0, act);
         act.value = value;
         return act;
@@ -105,13 +108,13 @@ function sampleCat(z, o, n, rand)
     return n-1;
 }
 
-// row = offset of the row in `out`; act = {club, spin, aim, dist}
+// row = offset of the row in `out`; act = {club, spin, aim, dist, impact}
 export function logProb(out, row, act)
 {
     let lp = out[row+C0+act.club] - lse(out, row+C0, N_CLUBS)
            + out[row+S0+act.spin] - lse(out, row+S0, N_SPIN);
-    const x = [act.aim, act.dist];
-    for (let d = 0; d < 2; ++d)
+    const x = [act.aim, act.dist, act.impact ?? 0];
+    for (let d = 0; d < N_CONT; ++d)
     {
         const ls = clampLS(out[row+LS+d]), z = (x[d] - out[row+MU+d])/Math.exp(ls);
         lp += -.5*z*z - ls - .5*LOG2PI;
@@ -154,8 +157,8 @@ export function ppoRowGrad(out, row, act, oldLogp, adv, hp, scale, dOut)
     }
     let ent = catEntropyGrad(out, row+C0, N_CLUBS, hp.entCat*scale, dOut)
             + catEntropyGrad(out, row+S0, N_SPIN, hp.entCat*scale, dOut);
-    const x = [act.aim, act.dist];
-    for (let d = 0; d < 2; ++d)
+    const x = [act.aim, act.dist, act.impact ?? 0];
+    for (let d = 0; d < N_CONT; ++d)
     {
         const raw = out[row+LS+d], ls = clampLS(raw), sd = Math.exp(ls);
         const z = (x[d] - out[row+MU+d])/sd;

@@ -1,7 +1,8 @@
-"""Upgrade a v3 checkpoint (before the solver) to obs v4.
+"""Upgrade a v3 checkpoint (before the solver and the impact action) to the current obs version.
 
 The new observation inputs get zero weights and the actor a SOLVE logit with
-zero weights and bias --solve-logit, so every old output is unchanged. At the
+zero weights and bias --solve-logit, and an impact head that swings straight
+(mean 0, narrow std), so every old output is unchanged. At the
 default -20 the agent never picks SOLVE and plays exactly as before, which is
 how models/agent.json keeps working in the browser. To fine-tune into the
 solver, pass a bias that lets it try SOLVE, or use `train.py --init`, which
@@ -15,6 +16,7 @@ import sys
 from pathlib import Path
 
 from .model import load_js, save_js
+from .sim import OBS_VERSION
 
 
 def main(argv=None):
@@ -27,7 +29,7 @@ def main(argv=None):
     model, meta = load_js(a.checkpoint, upgrade_solve_logit=a.solve_logit)
     out = Path(a.out or a.checkpoint)
     save_js(out, model, {**meta, 'upgradedFrom': j['obsVersion'], 'solveLogit': a.solve_logit})
-    print(f"{a.checkpoint} (obs v{j['obsVersion']}) -> {out} (obs v4, SOLVE bias {a.solve_logit:g})")
+    print(f"{a.checkpoint} (obs v{j['obsVersion']}) -> {out} (obs v{OBS_VERSION}, SOLVE bias {a.solve_logit:g})")
 
 
 if __name__ == '__main__':

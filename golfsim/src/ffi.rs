@@ -15,7 +15,7 @@ use crate::jsmath::Mulberry32;
 use crate::obs::{is_stuck, Action, N_CLUB_ACTIONS, OBS_DIM, OBS_VERSION};
 use rayon::prelude::*;
 
-pub const INFO_W: usize = 17;
+pub const INFO_W: usize = 18;
 pub const I_REWARD: usize = 0;
 pub const I_DONE: usize = 1;
 pub const I_RESULT: usize = 2; // RES_*: holed, stopped, water, ob
@@ -33,6 +33,7 @@ pub const I_POWER: usize = 13;
 pub const I_TO: usize = 14;
 pub const I_TREE: usize = 15;
 pub const I_SOLVED: usize = 16; // the shot played was the solver's (CLUB_SOLVE with a solution)
+pub const I_IMPACT: usize = 17; // the impact swung for (before the swing noise)
 
 struct Slot {
     env: GolfEnv,
@@ -75,6 +76,7 @@ impl Slot {
         info[I_TO] = l.to;
         info[I_TREE] = l.tree as u8 as f64;
         info[I_SOLVED] = l.solved as u8 as f64;
+        info[I_IMPACT] = l.impact;
         if !r.done {
             info[I_STUCK] = is_stuck(&e.prev, l.club == crate::game::CLUB_PUTTER) as u8 as f64;
             self.env.observe(obs);
@@ -204,7 +206,7 @@ pub unsafe extern "C" fn gs_vec_reset_spec(
 }
 
 /// One stroke in every active env (`active` may be null: all). Actions are
-/// n-long arrays. Writes each active env's obs row (the next state, or with
+/// n-long arrays (club, spin, aim, dist, impact). Writes each active env's obs row (the next state, or with
 /// auto_reset the first state of a new episode when it finished) and info row.
 ///
 /// # Safety
@@ -216,6 +218,7 @@ pub unsafe extern "C" fn gs_vec_step(
     spin: *const i32,
     aim: *const f64,
     dist: *const f64,
+    impact: *const f64,
     active: *const u8,
     auto_reset: u8,
     obs: *mut f32,
@@ -227,6 +230,7 @@ pub unsafe extern "C" fn gs_vec_step(
     let spin = std::slice::from_raw_parts(spin, n);
     let aim = std::slice::from_raw_parts(aim, n);
     let dist = std::slice::from_raw_parts(dist, n);
+    let impact = std::slice::from_raw_parts(impact, n);
     let active = if active.is_null() {
         None
     } else {
@@ -251,6 +255,7 @@ pub unsafe extern "C" fn gs_vec_step(
                     // a NaN would poison the ball (and never finish a drop)
                     aim: if aim[i].is_finite() { aim[i] } else { 0.0 },
                     dist: if dist[i].is_finite() { dist[i] } else { 0.0 },
+                    impact: if impact[i].is_finite() { impact[i] } else { 0.0 },
                 };
                 s.step(&a, ar, cp, sp, o, inf);
             });

@@ -135,10 +135,11 @@ async function playHoles(holes, cfg, seed)
         {
             const u = rand();
             const a = u < .2
-                ? {club: Math.floor(rand()*N_CLUB_ACTIONS), spin: Math.floor(rand()*3), aim: (rand()*2 - 1)*3, dist: rand()*6 - 4}
-                : u < .45 ? {club: CLUB_SOLVE, spin: Math.floor(rand()*3), aim: 0, dist: 0}
+                ? {club: Math.floor(rand()*N_CLUB_ACTIONS), spin: Math.floor(rand()*3), aim: (rand()*2 - 1)*3, dist: rand()*6 - 4,
+                   impact: (rand()*2 - 1)*3}
+                : u < .45 ? {club: CLUB_SOLVE, spin: Math.floor(rand()*3), aim: 0, dist: 0, impact: 0}
                 : model.act(obs, rand, randn, false);
-            const action = {club: a.club, spin: a.spin, aim: a.aim, dist: a.dist};
+            const action = {club: a.club, spin: a.spin, aim: a.aim, dist: a.dist, impact: a.impact};
             const js = env.step(action);
             const rs = await rust.call({cmd: 'step', action});
             const at = `${where} stroke ${s + 1} ${JSON.stringify(action)}`;
@@ -154,6 +155,8 @@ async function playHoles(holes, cfg, seed)
             assert.equal(rs.shot.lie, sh.lie, `${at}: lie`);
             assert.ok(Object.is(rs.shot.power, sh.power) && Object.is(rs.shot.want, sh.want), `${at}: decode`);
             assert.equal(rs.shot.solved, sh.solved, `${at}: solved`);
+            assert.ok(Object.is(rs.shot.impact, sh.impact), `${at}: impact js ${sh.impact} rust ${rs.shot.impact}`);
+            events.shaped = (events.shaped ?? 0) + (Math.abs(sh.impact) >= .02 ? 1 : 0);
             events.solved = (events.solved ?? 0) + sh.solved;
             events.solvedIn = (events.solvedIn ?? 0) + (sh.solved && js.info.result == 'holed' ? 1 : 0);
             events[js.info.result] = (events[js.info.result] ?? 0) + 1;

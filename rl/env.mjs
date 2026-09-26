@@ -80,7 +80,7 @@ export class GolfEnv
     }
     decode(action) { return this.observer.decode(action); }
 
-    // action: {club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim, dist}
+    // action: {club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim, dist, impact}
     // returns {obs, reward, done, info}
     step(action)
     {
@@ -89,12 +89,13 @@ export class GolfEnv
         const s = this.decode(action);
         const putt = s.club == G.CLUB_PUTTER;
         const lie = G.SURF_NAMES[G.groundAt(G.ball.x, G.ball.z).s], d0 = this.pinDist();
-        // the swing meter: a player's timing is never perfect. The draws are
-        // made either way, so exactSolve does not shift the random stream.
+        // the swing meter: the impact swung for, and a player's timing is never
+        // perfect on top of it. The draws are made either way, so exactSolve
+        // does not shift the random stream.
         const exact = cfg.exactSolve && s.solved;
         const impact0 = (M.random()*2 - 1)*cfg.impactNoise;
         const aim0 = putt ? 0 : (M.random()*2 - 1)*cfg.aimNoise;
-        const impact = exact ? 0 : impact0;
+        const impact = exact ? s.impact : s.impact + impact0;
         const yaw = s.yaw + (exact ? 0 : aim0);
         // the pin is pulled for a shot from the green inside 15yd, as enterAim does
         G.pinOut = d0 < 15 && lie == 'GREEN' ? 1 : 0;
@@ -117,7 +118,7 @@ export class GolfEnv
         this.prev = {moved: Math.hypot(b.x - G.shotStart.x, b.z - G.shotStart.z),
             tree: G.treeHit ? 1 : 0, hazard: result == 'water' || result == 'ob' ? 1 : 0};
         this.log.push({club: G.CLUBS[s.club][0], spin: s.spin, lie, from: d0, want: s.want,
-            power: s.power, result, to: this.pinDist(), tree: G.treeHit, solved: s.solved});
+            power: s.power, impact: s.impact, result, to: this.pinDist(), tree: G.treeHit, solved: s.solved});
         if (ev == G.EV_HOLED || this.strokes >= this.h.par + cfg.maxOver)
             this.done = true;
         return {obs: this.done ? null : this.observe(), reward, done: this.done,

@@ -7,7 +7,7 @@ use crate::game::*;
 use crate::jsmath::{self as jm, hypot2, js_max, js_min};
 use crate::solver::{self, Solution};
 
-pub const OBS_VERSION: u32 = 4;
+pub const OBS_VERSION: u32 = 5;
 pub const N_CLUBS: usize = 11;
 pub const N_SPIN: usize = 3;
 /// the club head's extra choice: the solver's shot (obs.mjs CLUB_SOLVE)
@@ -19,6 +19,9 @@ pub const AIM_CLIP: f64 = 3.0;
 pub const DIST_SCALE: f64 = 0.35;
 pub const DIST_LO: f64 = -4.0;
 pub const DIST_HI: f64 = 2.0;
+/// impact = IMPACT_SCALE * clip(raw, +-IMPACT_CLIP): the meter impact swung for
+pub const IMPACT_SCALE: f64 = 0.05;
+pub const IMPACT_CLIP: f64 = 2.6;
 
 const GA_FWD: [f64; 12] = [-0.1, 0.1, 0.25, 0.4, 0.55, 0.7, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5];
 const GA_LAT: [f64; 9] = [-0.4, -0.25, -0.12, -0.05, 0.0, 0.05, 0.12, 0.25, 0.4];
@@ -84,13 +87,15 @@ pub struct Reference {
     pub dist: f64,
 }
 
-/// A raw action: club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim, dist.
+/// A raw action: club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim,
+/// dist, impact.
 #[derive(Clone, Copy, Debug)]
 pub struct Action {
     pub club: usize,
     pub spin: usize,
     pub aim: f64,
     pub dist: f64,
+    pub impact: f64,
 }
 
 /// A decoded action: the swing the game plays.
@@ -102,6 +107,8 @@ pub struct Shot {
     pub power: f64,
     pub lm: f64,
     pub want: f64,
+    /// the meter impact swung for (+ early, - late); the swing noise adds to it
+    pub impact: f64,
     /// the solver's shot (CLUB_SOLVE with a solution)
     pub solved: bool,
 }
@@ -196,6 +203,7 @@ pub fn decode(g: &Game, r: &Reference, sol: &Solution, a: &Action) -> Shot {
                 power: sol.power,
                 lm: sol.lm,
                 want: sol.want,
+                impact: sol.impact,
                 solved: true,
             };
         }
@@ -220,6 +228,7 @@ pub fn decode(g: &Game, r: &Reference, sol: &Solution, a: &Action) -> Shot {
         power,
         lm,
         want,
+        impact: IMPACT_SCALE * clip(a.impact, -IMPACT_CLIP, IMPACT_CLIP),
         solved: false,
     }
 }

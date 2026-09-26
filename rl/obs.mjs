@@ -4,7 +4,7 @@
 // bump OBS_VERSION with any change to what observe() writes or decode() means.
 import { Solver } from './solver.mjs';
 
-export const OBS_VERSION = 4;
+export const OBS_VERSION = 5;
 export const CLASSIC_SEED = 1113;
 export const N_CLUBS = 11, N_SPIN = 3;
 export const CLUB_NAMES = ['1W', '3W', '5W', '3i', '5i', '7i', '9i', '13i', 'PW', 'SW', 'PT'];
@@ -18,8 +18,16 @@ export const ACTION_NAMES = [...CLUB_NAMES, 'SOLVE'];
 // line and target the game sets up for a player, see reference()):
 //   yaw  = ref.dir + AIM_SCALE*aimRaw            (radians)
 //   want = ref.dist * exp(DIST_SCALE*distRaw)    (yards the shot is asked to go)
+//   impact = IMPACT_SCALE*impactRaw               (the swing-meter impact aimed for)
 export const AIM_SCALE = .35, AIM_CLIP = 3;
 export const DIST_SCALE = .35, DIST_LO = -4, DIST_HI = 2;
+// THE IMPACT is the meter's timing error, and in the game it is a way to
+// shape the ball as much as a mistake: + early, - late, each pushing the shot
+// off line, curving it (launchBall's ballCurve = err*22) and costing a little
+// power, with |err| < .02 snapping to a perfect strike. The agent picks the
+// impact it swings for, up to the meter's late limit (METER_OVER, .13) either
+// way; the env's swing noise is added on top.
+export const IMPACT_SCALE = .05, IMPACT_CLIP = 2.6;
 
 // Two frames. The PIN frame (+fwd from the ball to the pin, +lat to its right)
 // holds grid A, scaled by the pin distance: the green's contour on a putt, the
@@ -270,16 +278,17 @@ export class Observer
 
     // Decode a raw action into the shot the game will play. Relative to the
     // reference of the LAST observe() - the state the action was chosen in.
-    // CLUB_SOLVE plays that observe()'s solution as is (aim and dist unused),
-    // or, with none, the game's club.
-    decode({club, spin, aim, dist})
+    // CLUB_SOLVE plays that observe()'s solution as is (aim, dist and impact
+    // unused), or, with none, the game's club.
+    decode({club, spin, aim, dist, impact = 0})
     {
         const G = this.G, ref = this.ref ?? this.reference();
         if (club == CLUB_SOLVE)
         {
             const s = this.solution;
             if (s?.found)
-                return {club: s.club, spin: s.spin, yaw: s.yaw, power: s.power, lm: s.lm, want: s.want, solved: 1};
+                return {club: s.club, spin: s.spin, yaw: s.yaw, power: s.power, lm: s.lm, want: s.want,
+                    impact: s.impact, solved: 1};
             club = ref.club;
         }
         const yaw = ref.dir + AIM_SCALE*clip(aim, -AIM_CLIP, AIM_CLIP);
@@ -288,6 +297,7 @@ export class Observer
         const power = club == G.CLUB_PUTTER
             ? clip(want/G.PUTT_MAX, .005, 1)
             : clip(want/(G.CLUBS[club][1]*lm), .02, 1);
-        return {club, spin: club == G.CLUB_PUTTER ? 0 : spin - 1, yaw, power, lm, want, solved: 0};
+        return {club, spin: club == G.CLUB_PUTTER ? 0 : spin - 1, yaw, power, lm, want,
+            impact: IMPACT_SCALE*clip(impact, -IMPACT_CLIP, IMPACT_CLIP), solved: 0};
     }
 }

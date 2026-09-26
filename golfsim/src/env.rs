@@ -64,6 +64,8 @@ pub struct ShotLog {
     pub from: f64,
     pub want: f64,
     pub power: f64,
+    /// the impact swung for (before the swing noise)
+    pub impact: f64,
     pub result: u8,
     pub to: f64,
     pub tree: bool,
@@ -230,7 +232,7 @@ impl GolfEnv {
         } else {
             (g.rng.next() * 2.0 - 1.0) * cfg.aim_noise
         };
-        let impact = if exact { 0.0 } else { impact0 };
+        let impact = if exact { s.impact } else { s.impact + impact0 };
         let yaw = s.yaw + if exact { 0.0 } else { aim0 };
         g.pin_out = d0 < 15.0 && lie == SURF_GREEN;
         g.tree_hit = false;
@@ -273,6 +275,7 @@ impl GolfEnv {
             from: d0,
             want: s.want,
             power: s.power,
+            impact: s.impact,
             result,
             to,
             tree: g.tree_hit,

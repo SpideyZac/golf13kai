@@ -104,6 +104,7 @@ window.botSwing = function aiSwing()
         const sol = observer.solution;
         console.log(`AI${stuck ? ' (escape)' : ''}${shot.solved ? ` SOLVE (holes ${(sol.pHole*100).toFixed(0)}%)` : ''}`
             + ` ${CLUB_NAMES[shot.club]} ${['back', 'flat', 'top'][shot.spin+1]}`
+            + (Math.abs(shot.impact) >= .02 ? ` ${shot.impact > 0 ? 'early' : 'late'} ${Math.abs(shot.impact).toFixed(2)}` : '')
             + ` aim ${((shot.yaw - observer.pinDir())*180/Math.PI).toFixed(1)}deg off the pin,`
             + ` asks ${shot.want.toFixed(1)}yd of ${ballToPin().toFixed(1)}`);
         botLined = 1;
@@ -119,9 +120,10 @@ window.botSwing = function aiSwing()
     lastPutt = shot.club == CLUB_PUTTER;
     flags.tree = flags.hazard = 0;
     const putt = shot.club == CLUB_PUTTER;
-    // the meter noise the agent trained with (none on an exactSolve solver shot)
+    // the impact it swings for (a hook or slice), plus the meter noise the
+    // agent trained with (none on an exactSolve solver shot)
     const exact = rules.exactSolve && shot.solved;
-    launchBall(shot.club, shot.power, exact ? 0 : rand(rules.impactNoise, -rules.impactNoise), shot.spin,
+    launchBall(shot.club, shot.power, shot.impact + (exact ? 0 : rand(rules.impactNoise, -rules.impactNoise)), shot.spin,
         shot.yaw + (putt || exact ? 0 : rand(rules.aimNoise, -rules.aimNoise)), shot.lm);
     putt ? snd_putt.play(.4 + shot.power*.6) : snd_tee.play(.5 + shot.power*.5, .8 + shot.power*.4);
     startFlight();

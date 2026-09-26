@@ -37,7 +37,8 @@ It is faster than the JS without changing a result. The value-noise lattice hash
 
 The raw action is **residual to the game's default shot**. `aim = 0, dist = 0` means the aim line and target the game sets up for a player (`aimDefault`): the pin when the suggested club can reach it, otherwise a lay-up one carry down the centreline. The network learns the corrections: wind, lines, break, and pace over or under. (v1–v2 were residual to the pin, which failed on hairpins. See below.)
 
-- The club is absolute, a categorical over 11, plus (v4) a 12th choice, `SOLVE`, that hands the swing to the solver (below). The game's own pre-selected club is in the observation, so "use the suggested club" is a single linear feature to pick up.
+- The club is absolute, a categorical over 11, plus (v4) a 12th choice, `SOLVE`, that hands the swing to the solver (below).
+- (v5) The swing-meter impact is chosen too. In the game a mistimed swing is also how you shape the ball: it pushes the start line, curves the flight and costs a little power. Treating it purely as noise took the hook and slice away from both the agent and the solver. The env's noise now adds to the impact swung for. Swinging straight keeps the game's perfect-strike snap (|impact| < 0.02), so shaping has a real cost to weigh. The game's own pre-selected club is in the observation, so "use the suggested club" is a single linear feature to pick up.
 - Aim is ±60° around the default line, so escapes are reachable, and the state-dependent log std lets putts get sub-degree precise while drives stay loose.
 - Distance is multiplicative (`exp`) because shot lengths span 1 to 600 yards.
 - Everything goes through the game's `launchBall` with swing-meter timing noise. The agent never gets a perfect strike for free, the same deal the scripted bot gets.
@@ -59,7 +60,8 @@ The goal was an agent that holes long shots by reading the wind perfectly, train
 - **An action, not an override.** The env never plays the solver on its own. `SOLVE` is a 12th club logit, and the solver's result is in the observation, so PPO learns when it pays. No action masking is needed: `SOLVE` without a solution falls back to the game's club.
 - **One solver, two hosts, bit for bit.** The observation includes the solver's numbers, so `rl/solver.mjs` (browser, JS env) and `golfsim/src/solver.rs` (training) must agree exactly, and the parity test plays a quarter of its shots as `SOLVE`. In the browser it runs on the live game between frames. It saves and restores every flight global, and the bounce sound is muted for the duration.
 - **Optional noise-free solver shots.** `exactSolve` plays a solved swing without meter error, so it always drops, and the agent's whole job becomes positioning. It is a rules change, off by default, and it travels with the checkpoint (`meta.env`) so every evaluator and the browser play the same game the model trained on. The random draws still happen, so the stream (wind, later swings) is the same with it on or off.
-- **Lossless upgrade.** New inputs are appended with zero weights and the `SOLVE` logit is inserted with zero weights, so a v3 agent upgrades to v4 unchanged. Fine-tuning then starts from a strong player instead of from scratch, and the trainer calibrates the new logit's bias so `SOLVE` gets explored.
+- **Curves find the blocked lies.** Most lies the straight search can't hole have a tree on the line. Hooking or slicing (impact ±0.06, ±0.12) bends the flight 10–20 yards and lifted solved lies by 2–5 points, to about 90%. Curves are the last resort, since each one costs trials on exactly the lies that are already failing.
+- **Lossless upgrade.** New inputs are appended with zero weights and the `SOLVE` logit is inserted with zero weights, and the impact head starts at mean 0 (straight) with a narrow std, so a v3 agent upgrades to v5 unchanged in its mode. Fine-tuning then starts from a strong player instead of from scratch, and the trainer calibrates the new logit's bias so `SOLVE` gets explored.
 
 ## Learning algorithm
 
@@ -78,6 +80,7 @@ PPO with GAE (λ = 0.95), a clipped surrogate (0.2), separate actor and critic M
 | r3 | **Exploring starts**: 30% of episodes begin at a random playable spot | Better, but pickups remained on hairpins. The pin line crosses the woods, and ±60° of pin-relative aim cannot follow the fairway. |
 | v3, r4 | **Actions residual to the game's default shot** (`aimDefault`), with shot-specific features in its aim frame | −9.9 / −9.4, about 7–8 strokes per round better than the scripted bot |
 | v4 | **The solver** and the `SOLVE` action, still −1 per stroke | Not trained yet. See TRAINING.md. |
+| v5 | **Impact as an action** (hooks and slices), for the agent and the solver | Not trained yet |
 
 The v3 change mattered most. With the game's own default as the zero action, the sensible shot is the prior and the network learns corrections. Even untrained, the default shot scores about +7 on classic, against +27 for aiming at the pin.
 
