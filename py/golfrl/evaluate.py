@@ -19,8 +19,8 @@ SCORE = ['albatross', 'eagle', 'birdie', 'par', 'bogey', 'double', 'triple+']
 @torch.no_grad()
 def play(model, specs, device='cpu', deterministic=True, escape=False, shots=False, threads=0):
     """Play every spec (round, seed, remix, hole, rng_seed) to the end. Returns
-    one dict per spec: round, hole, strokes, par, penalties, holed (and the
-    shots, if asked)."""
+    one dict per spec: round, hole, strokes, par, penalties, holed, holedFrom
+    (yards of the stroke that went in, or None) and the shots, if asked."""
     n = len(specs)
     env = sim.VecEnv(n, threads=threads)
     for i, (_, seed_, remix, hole, rng) in enumerate(specs):
@@ -49,25 +49,26 @@ def play(model, specs, device='cpu', deterministic=True, escape=False, shots=Fal
             if r[sim.DONE]:
                 done[i] = True
                 res[i].update(strokes=int(r[sim.STROKES]), par=int(r[sim.PAR]), penalties=int(r[sim.PENALTIES]),
-                              holed=bool(r[sim.HOLED]))
+                              holed=bool(r[sim.HOLED]), holedFrom=float(r[sim.FROM]) if r[sim.HOLED] else None)
     env.close()
     return res
 
 
-def summarise(results):
-    """pool.mjs summarise: per-round means."""
+def summarise(results, long_yd=30.):
+    """pool.mjs summarise: per-round means, plus hole-outs from long_yd+ yards."""
     rounds = {}
     for e in results:
-        r = rounds.setdefault(e['round'], {'strokes': 0, 'par': 0, 'pen': 0, 'pickups': 0})
+        r = rounds.setdefault(e['round'], {'strokes': 0, 'par': 0, 'pen': 0, 'pickups': 0, 'long': 0})
         r['strokes'] += e['strokes']
         r['par'] += e['par']
         r['pen'] += e['penalties']
         r['pickups'] += not e['holed']
+        r['long'] += (e.get('holedFrom') or 0) >= long_yd
     rs = list(rounds.values())
     to_par = [r['strokes'] - r['par'] for r in rs]
     return {'rounds': len(rs), 'strokes': np.mean([r['strokes'] for r in rs]), 'toPar': float(np.mean(to_par)),
             'penalties': float(np.mean([r['pen'] for r in rs])), 'pickups': float(np.mean([r['pickups'] for r in rs])),
-            'best': min(to_par), 'worst': max(to_par)}
+            'best': min(to_par), 'worst': max(to_par), 'longHoleOuts': float(np.mean([r['long'] for r in rs]))}
 
 
 def main(argv=None):
@@ -95,7 +96,8 @@ def main(argv=None):
         for e in res:
             dist[min(max(e['strokes'] - e['par'] + 3, 0), 6)] += 1
         print(f"{name}: {s['rounds']} rounds, {s['toPar']:+.2f} to par (mean {s['strokes']:.1f}, best {s['best']},"
-              f" worst {s['worst']}), {s['penalties']:.1f} penalties, {s['pickups']:.2f} pickups per round")
+              f" worst {s['worst']}), {s['penalties']:.1f} penalties, {s['pickups']:.2f} pickups,"
+              f" {s['longHoleOuts']:.2f} hole-outs from 30+ yd per round")
         print('  ' + '  '.join(f'{n} {d / len(res) * 100:.1f}%' for n, d in zip(SCORE, dist)))
         if a.card or a.shots:
             for e in (e for e in res if e['round'] == a.start):

@@ -15,7 +15,7 @@ use crate::jsmath::Mulberry32;
 use crate::obs::{is_stuck, Action, OBS_DIM, OBS_VERSION};
 use rayon::prelude::*;
 
-pub const INFO_W: usize = 16;
+pub const INFO_W: usize = 17;
 pub const I_REWARD: usize = 0;
 pub const I_DONE: usize = 1;
 pub const I_RESULT: usize = 2; // RES_*: holed, stopped, water, ob
@@ -32,6 +32,7 @@ pub const I_WANT: usize = 12;
 pub const I_POWER: usize = 13;
 pub const I_TO: usize = 14;
 pub const I_TREE: usize = 15;
+pub const I_TEE: usize = 16; // the episode started on the tee (not an exploring start)
 
 struct Slot {
     env: GolfEnv,
@@ -73,6 +74,7 @@ impl Slot {
         info[I_POWER] = l.power;
         info[I_TO] = l.to;
         info[I_TREE] = l.tree as u8 as f64;
+        info[I_TEE] = e.spec.start.is_none() as u8 as f64;
         if !r.done {
             info[I_STUCK] = is_stuck(&e.prev, l.club == crate::game::CLUB_PUTTER) as u8 as f64;
             self.env.observe(obs);

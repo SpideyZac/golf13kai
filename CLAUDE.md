@@ -11,7 +11,7 @@ A reinforcement learning agent for **Sunshine Golf Classic**, Frank Force's JS13
   - `src/obs.rs`, `src/env.rs`: `rl/obs.mjs` and `rl/env.mjs` + `rl/courses.mjs`.
   - `src/ffi.rs`: the batched, rayon-parallel C ABI Python uses (`info` columns `I_*`).
   - `src/bin/golfsim.rs`: `golfsim-cli serve` (JSON lines, for the parity test) and `bench`.
-- `py/golfrl/`: `sim.py` (ctypes `VecEnv`), `model.py` (the JS model in torch + JS checkpoint I/O), `train.py` (PPO), `evaluate.py`, `selftest.py`.
+- `py/golfrl/`: `sim.py` (ctypes `VecEnv`), `model.py` (the JS model in torch + JS checkpoint I/O), `train.py` (PPO), `hero.py` (the optional `--hero` reward shaping, trainer-side only), `evaluate.py`, `selftest.py`.
 - `rl/sim/loader.mjs`: concatenates `engineMath.js` + `course.js` + `golfSim.js` into an isolated closure per instance (the JS reference env).
 - `rl/sim/api.mjs`: `API_BODY`, the ONE list of game bindings (getters/setters), shared by the Node loader and the browser.
 - `rl/obs.mjs`: `Observer`, which holds the observation, the reference (the game's default shot) and action decoding. Pure, no Node imports, because the browser runs it. **Spec: `docs/SPEC.md`.**
@@ -31,6 +31,7 @@ PARITY_HOLES=1500 npm test                          # the thorough parity run (~
 golfsim/target/release/golfsim-cli bench            # Rust speed
 cd py && python -m golfrl.selftest                  # torch net == browser net, checkpoint round trip
 cd py && python -m golfrl.train --name r5 --iters 400 --lr 2.5e-4   # ~12 min on 16 CPU cores; GPU auto
+cd py && python -m golfrl.train --name hero1 --init ../models/agent.json --hero 1 --iters 200 --lr 1e-4   # hero-shot shaping (off unless --hero > 0)
 cd py && python -m golfrl.evaluate ../runs/r5/best.json --rounds 20 --escape
 npm run eval -- runs/r5/best.json --rounds 20 --escape   # the JS eval reads Python checkpoints too
 npm run baseline -- --rounds 20                     # default-shot + scripted bot references

@@ -8,6 +8,7 @@ critic (it carries on into the next iteration). See docs/TRAINING.md.
 
 usage: python -m golfrl.train --name r5 [--iters 400] [--envs 512 --steps 32]
        [--lr 3e-4] [--device cuda] [--resume runs/r5/last.pt] [--init models/agent.json]
+       [--hero 1]   (hero-shot reward shaping, see golfrl/hero.py)
 
 Writes runs/<name>/: log.csv (the JS trainer's columns, so `npm run plot`
 works), config.json, best.json and last.json (JS format, for the browser and
@@ -26,12 +27,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from . import sim
+from . import hero, sim
 from .evaluate import play, summarise
 from .model import DEFAULT_HIDDEN, Model, entropies, load_js, log_prob, sample, save_js
 
 LOG_COLS = ['iter', 'steps', 'episodes', 'toPar', 'penalties', 'pickups', 'pl', 'vl', 'ent', 'kl', 'clipfrac',
-            'gradNorm', 'lr', 'sps', 'evalClassic', 'evalRemix']
+            'gradNorm', 'lr', 'sps', 'evalClassic', 'evalRemix', 'longHoleOuts', 'heroBonus']
 
 
 def parse(argv=None):
@@ -62,6 +63,7 @@ def parse(argv=None):
     ap.add_argument('--eval-rounds', type=int, default=4)
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--device', default='auto', help='auto, cuda, cuda:1, cpu, ...')
+    hero.add_args(ap)
     return ap.parse_args(argv)
 
 
@@ -94,11 +96,14 @@ def main(argv=None):
     opt = torch.optim.Adam(model.parameters(), lr=a.lr, eps=1e-8)
     start_iter, total_steps, best_eval = 0, 0, math.inf
     recent = collections.deque(maxlen=2000)
+    recent_hero = collections.deque(maxlen=2000)  # per hole: (holed from 30+ yards, hero bonus earned)
+    hc = hero.HeroCfg.from_args(a)
     if state:
         model.load_state_dict(state['model'])
         opt.load_state_dict(state['opt'])
         start_iter, total_steps, best_eval = state['iter'], state['total_steps'], state['best_eval']
         recent.extend(state.get('recent', []))
+        recent_hero.extend(state.get('recent_hero', []))
         torch.set_rng_state(state['torch_rng'])
 
     n, T = a.envs, a.steps
@@ -112,6 +117,9 @@ def main(argv=None):
     n_params = sum(p.numel() for p in model.parameters())
     print(f'run {a.name}: {n} envs x {T} steps = {n * T} strokes/iter on {dev}, {n_params} params,'
           f' env threads {a.threads or os.cpu_count()}')
+    if hc.on:
+        print(f'hero shaping x{hc.scale}: hole-out {hc.hole} (ramp {hc.min_yd:g}-{hc.full_yd:g} yd), near {hc.near}'
+              f' within {hc.radius:g} yd, under birdie +{hc.under}/stroke, over birdie -{hc.over}/stroke')
 
     D = sim.OBS_DIM
     buf_obs = torch.zeros((T, n, D), device=dev)
@@ -123,6 +131,7 @@ def main(argv=None):
     buf_rew = torch.zeros((T, n), device=dev)
     buf_done = torch.zeros((T, n), device=dev)
     obs = torch.from_numpy(env.reset_train()).to(dev)
+    ep_bonus = np.zeros(n)
     meta = lambda it, **k: {'iter': it, 'totalSteps': total_steps, 'bestEval': best_eval, 'trainer': 'python', **k}
 
     for it in range(start_iter, a.iters):
@@ -144,11 +153,16 @@ def main(argv=None):
                 buf_val[t] = v
                 c = cont.double().cpu().numpy()
                 o, info = env.step(club.cpu().numpy(), spin.cpu().numpy(), c[:, 0], c[:, 1])
-                buf_rew[t] = torch.from_numpy(info[:, sim.REWARD]).to(dev)
+                hb = hero.bonus(hc, info)
+                ep_bonus += hb
+                buf_rew[t] = torch.from_numpy(info[:, sim.REWARD] + hb).to(dev)
                 buf_done[t] = torch.from_numpy(info[:, sim.DONE]).to(dev)
+                long_ho = hero.is_long_holeout(info)
                 for i in np.flatnonzero(info[:, sim.DONE]):
                     r = info[i]
                     recent.append((r[sim.STROKES] - r[sim.PAR], r[sim.PENALTIES], not r[sim.HOLED]))
+                    recent_hero.append((float(long_ho[i]), ep_bonus[i]))
+                    ep_bonus[i] = 0.
                 obs = torch.from_numpy(o).to(dev)
             next_v = model.critic(obs).squeeze(-1)
             # GAE; a finished episode's next value is 0 (it ended)
@@ -207,13 +221,17 @@ def main(argv=None):
         # ---- log, eval, checkpoints ----
         rc = np.array(recent) if recent else np.zeros((1, 3))
         to_par, pen, pick = rc[:, 0].mean(), rc[:, 1].mean(), rc[:, 2].mean()
+        rh = np.array(recent_hero) if recent_hero else np.zeros((1, 2))
+        long_ho, hero_b = rh[:, 0].mean(), rh[:, 1].mean()
         ev_c = ev_r = ''
         if a.eval_every and ((it + 1) % a.eval_every == 0 or it == a.iters - 1):
             c = summarise(play(model, sim.eval_set('classic', a.eval_rounds), dev, threads=a.threads))
             r = summarise(play(model, sim.eval_set('remix', a.eval_rounds), dev, threads=a.threads))
             ev_c, ev_r = f"{c['toPar']:.2f}", f"{r['toPar']:.2f}"
             print(f"  eval classic {ev_c} (best {c['best']}, worst {c['worst']}, pen {c['penalties']:.1f})"
-                  f"  remix {ev_r} (pen {r['penalties']:.1f}, pickups {r['pickups']:.2f})")
+                  f"  remix {ev_r} (pen {r['penalties']:.1f}, pickups {r['pickups']:.2f})"
+                  f"  long hole-outs/round {c['longHoleOuts']:.2f} / {r['longHoleOuts']:.2f}")
+            # selection stays on the true score, hero shaping or not
             score = (c['toPar'] + r['toPar']) / 2
             if score < best_eval:
                 best_eval = score
@@ -222,14 +240,16 @@ def main(argv=None):
             save_js(run / 'last.json', model, meta(it + 1))
             torch.save({'model': model.state_dict(), 'opt': opt.state_dict(), 'hidden': hidden, 'iter': it + 1,
                         'total_steps': total_steps, 'best_eval': best_eval, 'recent': list(recent),
+                        'recent_hero': list(recent_hero),
                         'torch_rng': torch.get_rng_state(), 'args': vars(a)}, run / 'last.pt')
         Bn = max(1, st['B'])
         row = [it + 1, total_steps, len(recent), f'{to_par:.3f}', f'{pen:.3f}', f'{pick:.3f}', f"{st['pl'] / Bn:.4f}",
                f"{st['vl'] / Bn:.4f}", f"{st['ent'] / Bn:.3f}", f'{kl:.4f}', f"{st['clip'] / Bn:.3f}", f'{gn:.3f}',
-               f'{lr:.2e}', int(n * T / dt), ev_c, ev_r]
+               f'{lr:.2e}', int(n * T / dt), ev_c, ev_r, f'{long_ho:.4f}', f'{hero_b:.4f}']
         with log_path.open('a', newline='') as fh:
             csv.writer(fh).writerow(row)
-        print(f"it {it + 1} steps {total_steps} toPar/hole {to_par:.3f} pen {pen:.2f} pick {pick:.3f}"
+        hero_s = f" longHO {long_ho * 100:.2f}% bonus {hero_b:+.3f}" if hc.on else ''
+        print(f"it {it + 1} steps {total_steps} toPar/hole {to_par:.3f} pen {pen:.2f} pick {pick:.3f}{hero_s}"
               f" vl {st['vl'] / Bn:.3f} ent {st['ent'] / Bn:.2f} kl {kl:.4f} clip {st['clip'] / Bn:.3f} gn {gn:.2f}"
               f" {int(n * T / dt)} sps (rollout {t_roll:.1f}s, update {dt - t_roll:.1f}s)", flush=True)
     env.close()
