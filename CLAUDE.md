@@ -33,6 +33,7 @@ golfsim/target/release/golfsim-cli bench            # Rust speed
 cd py && python -m golfrl.selftest                  # torch net == browser net, checkpoint round trip
 cd py && python -m golfrl.train --name r5 --iters 400 --lr 2.5e-4   # ~12 min on 16 CPU cores; GPU auto
 cd py && python -m golfrl.train --name solve1 --init ../models/agent.json --iters 300 --lr 1.5e-4   # fine-tune into the solver (v3 inits upgrade)
+cd py && python -m golfrl.train --name exact1 --init ../models/agent.json --exact-solve   # solver shots noise-free (always drop)
 cd py && python -m golfrl.upgrade ../models/agent.json   # v3 checkpoint -> v4, SOLVE never picked (plays as before)
 cd py && python -m golfrl.evaluate ../runs/r5/best.json --rounds 20 --escape
 npm run eval -- runs/r5/best.json --rounds 20 --escape   # the JS eval reads Python checkpoints too
@@ -50,6 +51,7 @@ npm run build:web                                   # build/index.html: one file
 - **Keep the train/eval split honest.** Training uses remix seeds ≥ 1000; eval uses classic 1113 plus remix seeds 1…R. The trainer selects `best.json` on rounds 0–3, so final reports use `--from 4` (the default in both evals).
 - **After editing `nn.mjs` or `policy.mjs` math, run `npm test`.** It holds finite-difference checks.
 - **The solver runs on the live game in the browser.** It must restore every global a shot writes (`save`/`restore` in `rl/solver.mjs`, `Game::save_flight` in Rust), and those need setters in `rl/sim/api.mjs`. If the submodule adds flight state, add it there too.
+- **Env rules travel with the checkpoint.** `train.py` writes `meta.env` (`impactNoise`, `aimNoise`, `solver`, `exactSolve`), and `evaluate.py`, `rl/eval.mjs` and `rl/web/ai.mjs` read it. A new env option that changes play belongs there too.
 - **Rule mirrors.** `GolfEnv.hazardDrop` and the pin rule mirror `Golf13K/game/game.js`, and `Observer.reference()` mirrors `aimDefault`. Re-check them (in JS and Rust) if the submodule is bumped.
 - **Performance.** The envs saturate every core (rayon), so don't run evals alongside training unless you accept the slowdown. The Python trainer's time splits about evenly between play and update on CPU; a GPU takes most of the update.
 - **No doctype on the web pages.** The engine sizes its canvas from `body.clientHeight`, which is the viewport only in quirks mode. With `<!doctype html>` the canvas is 0px tall and the screen is black while the game keeps playing (`build.mjs` refuses to emit one). Headless Chrome screenshots work (`--use-angle=swiftshader`), and the console log (`AI …`, `SHOT …`, `RESULT …`) shows every shot.

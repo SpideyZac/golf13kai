@@ -14,6 +14,7 @@ export const DEFAULT_ENV = {
     aimNoise: .015,    // uniform +- radians on full swings (the scripted bot's)
     maxOver: 5,        // the game's mercy rule: pick up at par+5
     solver: true,      // run the solver (rl/solver.mjs) in every observation
+    exactSolve: false, // the solver's shots skip the swing noise (and so always drop)
 };
 
 export class GolfEnv
@@ -73,8 +74,9 @@ export class GolfEnv
     observe()
     {
         const c = this.cfg;
+        // with exactSolve its shots are played noise-free, so it measures them that way
         return this.observer.observe({strokes: this.strokes, prev: this.prev, maxOver: c.maxOver,
-            impactNoise: c.impactNoise, aimNoise: c.aimNoise, solve: c.solver});
+            impactNoise: c.exactSolve ? 0 : c.impactNoise, aimNoise: c.exactSolve ? 0 : c.aimNoise, solve: c.solver});
     }
     decode(action) { return this.observer.decode(action); }
 
@@ -87,9 +89,13 @@ export class GolfEnv
         const s = this.decode(action);
         const putt = s.club == G.CLUB_PUTTER;
         const lie = G.SURF_NAMES[G.groundAt(G.ball.x, G.ball.z).s], d0 = this.pinDist();
-        // the swing meter: a player's timing is never perfect
-        const impact = (M.random()*2 - 1)*cfg.impactNoise;
-        const yaw = s.yaw + (putt ? 0 : (M.random()*2 - 1)*cfg.aimNoise);
+        // the swing meter: a player's timing is never perfect. The draws are
+        // made either way, so exactSolve does not shift the random stream.
+        const exact = cfg.exactSolve && s.solved;
+        const impact0 = (M.random()*2 - 1)*cfg.impactNoise;
+        const aim0 = putt ? 0 : (M.random()*2 - 1)*cfg.aimNoise;
+        const impact = exact ? 0 : impact0;
+        const yaw = s.yaw + (exact ? 0 : aim0);
         // the pin is pulled for a shot from the green inside 15yd, as enterAim does
         G.pinOut = d0 < 15 && lie == 'GREEN' ? 1 : 0;
         G.treeHit = 0;

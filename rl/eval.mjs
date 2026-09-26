@@ -22,9 +22,11 @@ const {values: a, positionals} = parseArgs({allowPositionals: true, options: {
 }});
 const file = positionals[0] ?? 'models/agent.json';
 const ck = loadCheckpoint(file);
-const pool = new Pool({workers: a.workers && +a.workers, arch: ck.arch});
+// play by the rules it trained under (py/golfrl/train.py records them as meta.env)
+const envCfg = ck.meta.env ?? {};
+const pool = new Pool({workers: a.workers && +a.workers, arch: ck.arch, envCfg});
 pool.params.set(ck.params);
-console.log(`${file}  (iter ${ck.meta.iter}, ${ck.meta.totalSteps} steps)`);
+console.log(`${file}  (iter ${ck.meta.iter}, ${ck.meta.totalSteps} steps)  rules ${JSON.stringify(envCfg)}`);
 
 const SCORE = ['albatross', 'eagle', 'birdie', 'par', 'bogey', 'double', 'triple+'];
 for (const set of a.set == 'both' ? ['classic', 'remix'] : [a.set])

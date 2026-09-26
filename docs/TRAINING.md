@@ -55,6 +55,8 @@ Where the time goes: the envs run on the CPU, one per core (~24k strokes/s on 16
 | `--eval-every` / `--eval-rounds` | 10 / 4 | Deterministic 18-hole rounds on each eval set |
 | `--device` | auto | `cuda` when available, else `cpu` |
 | `--no-solver` | (on) | Turns the solver off: its observation block is zeros and `SOLVE` plays the game's club. Eval follows the same setting. |
+| `--exact-solve` | off | The solver's shots skip the swing noise, so every solution drops (see below) |
+| `--impact-noise` / `--aim-noise` | 0.04 / 0.015 | Swing error on every shot. 0 removes it. |
 | `--init-solve-p` | 0.15 | With a v3 `--init`: the share of shots the upgraded agent starts out playing `SOLVE` |
 
 The original pure-Node trainer (`npm run train`, `rl/train.mjs`) still works and takes the same PPO flags, with `--workers` in place of `--envs`. It is ~18× slower.
@@ -88,7 +90,16 @@ What to watch:
 | Eval printout | `SOLVE/round` per set, and how many dropped |
 | `golfrl.evaluate` | Solver shots and hole-outs per round, and `SOLVE` on each solver shot with `--shots` |
 
-**Speed.** An in-range observation plays 10–60 trial shots. The env runs about 4× slower (about 6k strokes/s on 16 cores, against 27k), so on the CPU an iteration takes about 3 s instead of 1.4 s. `--no-solver` restores the old speed and behaviour.
+**Noise-free solver shots (`--exact-solve`).** By default a solver shot gets the same swing-meter error as any other shot, so it drops only as often as its P(holed). With `--exact-solve` the solver's shot is played perfectly and always drops. The agent's own shots keep their noise, so the game becomes "get the ball to a spot the solver can hole from, then press SOLVE". Expect most holes in two strokes, and many par 3s in one. `--impact-noise 0 --aim-noise 0` removes the error from every shot instead.
+
+```sh
+python -m golfrl.train --name exact1 --init ../models/agent.json --exact-solve --iters 300 --lr 1.5e-4
+python -m golfrl.evaluate ../runs/exact1/best.json --rounds 20 --escape   # uses the run's rules automatically
+```
+
+The rules are saved in every checkpoint (`meta.env`). `golfrl.evaluate` (override with `--exact-solve`, `--noisy-solve`, `--no-solver`, `--impact-noise`, `--aim-noise`), `npm run eval` and the browser agent all play by them. Under `--exact-solve` the solver skips its noise replays, so the env is faster than with noisy solver shots.
+
+**Speed.** An in-range observation plays 10–60 trial shots. The env runs about 4.5× slower (about 5.8k strokes/s on 16 cores, against 27k), so on the CPU an iteration takes about 3 s instead of 1.4 s. `--no-solver` restores the old speed and behaviour.
 
 **Scores.** An agent that uses the solver knows the exact physics, so do not compare its scores with the scripted bot or the v3 rows below as like for like. Report it as its own row.
 

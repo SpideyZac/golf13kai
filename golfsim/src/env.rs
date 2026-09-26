@@ -21,6 +21,8 @@ pub struct EnvCfg {
     pub max_over: i32,
     /// run the solver (solver.rs) in every observation
     pub solver: bool,
+    /// the solver's shots skip the swing noise (and so always drop)
+    pub exact_solve: bool,
 }
 
 impl Default for EnvCfg {
@@ -30,6 +32,7 @@ impl Default for EnvCfg {
             aim_noise: 0.015,
             max_over: 5,
             solver: true,
+            exact_solve: false,
         }
     }
 }
@@ -183,8 +186,8 @@ impl GolfEnv {
     pub fn observe(&mut self, o: &mut [f32]) {
         let c = self.cfg;
         let sc = SolveCfg {
-            impact_noise: c.impact_noise,
-            aim_noise: c.aim_noise,
+            impact_noise: if c.exact_solve { 0.0 } else { c.impact_noise },
+            aim_noise: if c.exact_solve { 0.0 } else { c.aim_noise },
             on: c.solver,
         };
         let (r, sol) = obs::observe(&mut self.g, self.strokes, &self.prev, c.max_over, &sc, o);
@@ -219,13 +222,16 @@ impl GolfEnv {
         let putt = s.club == CLUB_PUTTER;
         let lie = g.ball_ground().s;
         let d0 = obs::pin_dist(g);
-        let impact = (g.rng.next() * 2.0 - 1.0) * cfg.impact_noise;
-        let yaw = s.yaw
-            + if putt {
-                0.0
-            } else {
-                (g.rng.next() * 2.0 - 1.0) * cfg.aim_noise
-            };
+        // the draws are made either way, so exact_solve does not shift the stream
+        let exact = cfg.exact_solve && s.solved;
+        let impact0 = (g.rng.next() * 2.0 - 1.0) * cfg.impact_noise;
+        let aim0 = if putt {
+            0.0
+        } else {
+            (g.rng.next() * 2.0 - 1.0) * cfg.aim_noise
+        };
+        let impact = if exact { 0.0 } else { impact0 };
+        let yaw = s.yaw + if exact { 0.0 } else { aim0 };
         g.pin_out = d0 < 15.0 && lie == SURF_GREEN;
         g.tree_hit = false;
         g.launch_ball(s.club, s.power, impact, s.spin, yaw, s.lm);

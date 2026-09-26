@@ -14,6 +14,8 @@ const SIM_FRAMES: i32 = 60 * 30;
 const PERFECT: f64 = 0.02;
 /// the sand wedge: the chip candidate when the game hands over the putter off the green
 const SW: usize = 9;
+/// the fallback searches this many clubs either side of the game's
+const FALLBACK_CLUBS: usize = 2;
 
 const PI: f64 = std::f64::consts::PI;
 const TAU: f64 = 2.0 * std::f64::consts::PI;
@@ -114,6 +116,54 @@ fn candidates(auto: usize, lie: u8, d: f64) -> Vec<(usize, f64)> {
     c
 }
 
+/// Solver.fallback: when no candidate holes, the clubs up to FALLBACK_CLUBS
+/// either side of the game's (the wedge's, when it handed over the putter),
+/// longest first, each with no spin, backspin and topspin.
+fn fallback(auto: usize, tried: &[(usize, f64)]) -> Vec<(usize, f64)> {
+    let base = if auto == CLUB_PUTTER { SW } else { auto };
+    let mut c = Vec::new();
+    for k in base.saturating_sub(FALLBACK_CLUBS)..=(base + FALLBACK_CLUBS).min(SW) {
+        for spin in [0.0, -1.0, 1.0] {
+            if !tried.iter().any(|&(tc, ts)| tc == k && ts == spin) {
+                c.push((k, spin));
+            }
+        }
+    }
+    c
+}
+
+/// Solver.steer: (yaw, power, want) of a swing of (club, spin) that holes.
+fn steer(g: &mut Game, club: usize, spin: f64, d: f64, pdir: f64, pin_out: bool) -> Option<(f64, f64, f64)> {
+    let (bx, bz) = (g.ball.x, g.ball.z);
+    let putt = club == CLUB_PUTTER;
+    let lm = g.lie_mul(club);
+    let max = if putt { PUTT_MAX } else { CLUBS[club].1 * lm };
+    let lo = if putt { 0.005 } else { 0.02 };
+    let (mut yaw, mut want) = (pdir, d);
+    for _ in 0..SOLVE_ITERS {
+        let power = js_min(js_max(want / max, lo), 1.0);
+        let r = trial(g, club, spin, yaw, power, lm, 0.0, 0.0, pin_out);
+        if r.ev == EV_HOLED {
+            return Some((yaw, power, want));
+        }
+        let dx = r.x - bx;
+        let dz = r.z - bz;
+        let got = hypot2(dx, dz);
+        if got < 0.5 || (power == 1.0 && got < d) {
+            return None;
+        }
+        let mut turn = pdir - jm::atan2(dx, dz);
+        if turn > PI {
+            turn -= TAU;
+        } else if turn < -PI {
+            turn += TAU;
+        }
+        yaw += turn;
+        want *= d / got;
+    }
+    None
+}
+
 /// Solver.solve: the best holing swing from the current lie, if any.
 pub fn solve(g: &mut Game, impact_noise: f64, aim_noise: f64) -> Solution {
     let (bx, bz) = (g.ball.x, g.ball.z);
@@ -136,36 +186,17 @@ pub fn solve(g: &mut Game, impact_noise: f64, aim_noise: f64) -> Solution {
         tried: true,
         ..Default::default()
     };
-    for (club, spin) in candidates(auto, lie, d) {
+    let cands = candidates(auto, lie, d);
+    let fb = fallback(auto, &cands);
+    // every candidate is solved and the best odds win; the fallback stops at
+    // its first solution
+    for (pass, (club, spin)) in cands.iter().map(|&c| (0, c)).chain(fb.into_iter().map(|c| (1, c))) {
+        if pass == 1 && best.found {
+            break;
+        }
         let putt = club == CLUB_PUTTER;
         let lm = g.lie_mul(club);
-        let max = if putt { PUTT_MAX } else { CLUBS[club].1 * lm };
-        let lo = if putt { 0.005 } else { 0.02 };
-        let (mut yaw, mut want) = (pdir, d);
-        let mut hit: Option<(f64, f64, f64)> = None;
-        for _ in 0..SOLVE_ITERS {
-            let power = js_min(js_max(want / max, lo), 1.0);
-            let r = trial(g, club, spin, yaw, power, lm, 0.0, 0.0, pin_out);
-            if r.ev == EV_HOLED {
-                hit = Some((yaw, power, want));
-                break;
-            }
-            let dx = r.x - bx;
-            let dz = r.z - bz;
-            let got = hypot2(dx, dz);
-            if got < 0.5 || (power == 1.0 && got < d) {
-                break;
-            }
-            let mut turn = pdir - jm::atan2(dx, dz);
-            if turn > PI {
-                turn -= TAU;
-            } else if turn < -PI {
-                turn += TAU;
-            }
-            yaw += turn;
-            want *= d / got;
-        }
-        let Some((hy, hp, hw)) = hit else { continue };
+        let Some((hy, hp, hw)) = steer(g, club, spin, d, pdir, pin_out) else { continue };
         let (mut p_hole, mut p_hazard, mut leave) = (0.0, 0.0, 0.0);
         for (imp, aim, w) in noise_samples(impact_noise, aim_noise, putt) {
             if imp == 0.0 && aim == 0.0 {

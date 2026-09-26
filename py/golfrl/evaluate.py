@@ -17,13 +17,14 @@ SCORE = ['albatross', 'eagle', 'birdie', 'par', 'bogey', 'double', 'triple+']
 
 
 @torch.no_grad()
-def play(model, specs, device='cpu', deterministic=True, escape=False, shots=False, threads=0, solver=True):
+def play(model, specs, device='cpu', deterministic=True, escape=False, shots=False, threads=0, rules=None):
     """Play every spec (round, seed, remix, hole, rng_seed) to the end. Returns
     one dict per spec: round, hole, strokes, par, penalties, holed, holedFrom
     (yards of the stroke that went in, or None), solved (solver's shots
-    played), solvedHoled (of them, holed) and the shots, if asked."""
+    played), solvedHoled (of them, holed) and the shots, if asked. rules: the
+    env rules (sim.DEFAULT_RULES keys), e.g. a checkpoint's meta['env']."""
     n = len(specs)
-    env = sim.VecEnv(n, threads=threads, solver=solver)
+    env = sim.VecEnv(n, threads=threads, **sim.rules_kwargs(rules))
     for i, (_, seed_, remix, hole, rng) in enumerate(specs):
         env.reset_spec(i, seed_, remix, hole, rng)
     done = np.zeros(n, bool)
@@ -90,17 +91,29 @@ def main(argv=None):
     ap.add_argument('--escape', action='store_true', help='sample instead of the mode after a stuck shot')
     ap.add_argument('--card', action='store_true', help='hole-by-hole card of the first round')
     ap.add_argument('--shots', action='store_true', help='every shot of the first round')
-    ap.add_argument('--no-solver', dest='solver', action='store_false', help='play with the solver off')
+    # the rules default to the ones the checkpoint was trained under (meta env)
+    ap.add_argument('--no-solver', dest='solver', action='store_const', const=False, help='play with the solver off')
+    ap.add_argument('--exact-solve', dest='exact_solve', action='store_const', const=True,
+                    help="the solver's shots skip the swing noise")
+    ap.add_argument('--noisy-solve', dest='exact_solve', action='store_const', const=False,
+                    help="the solver's shots get the swing noise")
+    ap.add_argument('--impact-noise', type=float)
+    ap.add_argument('--aim-noise', type=float)
     ap.add_argument('--device', default='cpu')
     ap.add_argument('--threads', type=int, default=0)
     a = ap.parse_args(argv)
 
     model, meta = load_js(a.checkpoint)
     model.to(a.device)
-    print(f"{a.checkpoint}  (iter {meta.get('iter')}, {meta.get('totalSteps')} steps)")
+    rules = {**sim.DEFAULT_RULES, **meta.get('env', {})}
+    for k, v in (('solver', a.solver), ('exactSolve', a.exact_solve), ('impactNoise', a.impact_noise),
+                 ('aimNoise', a.aim_noise)):
+        if v is not None:
+            rules[k] = v
+    print(f"{a.checkpoint}  (iter {meta.get('iter')}, {meta.get('totalSteps')} steps)  rules {rules}")
     for name in (['classic', 'remix'] if a.set == 'both' else [a.set]):
         res = play(model, sim.eval_set(name, a.rounds, a.start), a.device, not a.stochastic, a.escape,
-                   shots=a.shots, threads=a.threads, solver=a.solver)
+                   shots=a.shots, threads=a.threads, rules=rules)
         s = summarise(res)
         dist = np.zeros(len(SCORE))
         for e in res:

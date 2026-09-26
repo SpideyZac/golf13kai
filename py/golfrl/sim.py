@@ -42,7 +42,7 @@ def _load():
     lib.gs_obs_dim.restype = U
     lib.gs_info_width.restype = U
     lib.gs_vec_new.restype = P
-    lib.gs_vec_new.argtypes = [U, U, D, D, I, U, D, D, U8]
+    lib.gs_vec_new.argtypes = [U, U, D, D, I, U, D, D, U8, U8]
     lib.gs_vec_free.argtypes = [P]
     lib.gs_vec_reset_train.argtypes = [P, F]
     lib.gs_vec_reset_spec.argtypes = [P, U, D, U8, U, U, U8, D, D, F]
@@ -70,10 +70,10 @@ class VecEnv:
     """
 
     def __init__(self, n, threads=0, impact_noise=.04, aim_noise=.015, max_over=5, seed=1,
-                 classic_prob=0., start_prob=.3, solver=True):
+                 classic_prob=0., start_prob=.3, solver=True, exact_solve=False):
         self.n = n
         self._h = _lib.gs_vec_new(n, threads, impact_noise, aim_noise, max_over, seed & 0xFFFFFFFF,
-                                  classic_prob, start_prob, int(bool(solver)))
+                                  classic_prob, start_prob, int(bool(solver)), int(bool(exact_solve)))
         self.obs = np.zeros((n, OBS_DIM), np.float32)
         self.info = np.zeros((n, INFO_W), np.float64)
 
@@ -107,6 +107,18 @@ class VecEnv:
         _lib.gs_vec_step(self._h, _ptr(club), _ptr(spin), _ptr(aim), _ptr(dist), act, int(auto_reset),
                          _ptr(self.obs), _ptr(self.info))
         return self.obs, self.info
+
+
+# The env rules a checkpoint was trained under, as train.py records them in its
+# meta ('env'); evaluate.py and the browser play by the same rules.
+DEFAULT_RULES = {'impactNoise': .04, 'aimNoise': .015, 'solver': True, 'exactSolve': False}
+
+
+def rules_kwargs(rules):
+    """VecEnv keyword arguments for a rules dict (missing keys: defaults)."""
+    r = {**DEFAULT_RULES, **(rules or {})}
+    return {'impact_noise': r['impactNoise'], 'aim_noise': r['aimNoise'], 'solver': r['solver'],
+            'exact_solve': r['exactSolve']}
 
 
 def eval_set(name, rounds, start=0):

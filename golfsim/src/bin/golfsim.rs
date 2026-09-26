@@ -6,8 +6,10 @@
 //!                        a batch on every core
 //!
 //! serve requests, one per line; every reply is one line:
-//!   {"cmd":"reset","spec":{seed,remix,hole,rngSeed,start?:{u,v}},"detail":bool}
-//!       -> {obs, hole:{...}} (detail adds every prop: near [[x,z,s,y]...])
+//!   {"cmd":"reset","spec":{seed,remix,hole,rngSeed,start?:{u,v}},"detail":bool,
+//!    "cfg"?:{impactNoise,aimNoise,exactSolve}}
+//!       -> {obs, hole:{...}} (detail adds every prop: near [[x,z,s,y]...]);
+//!       cfg (optional) replaces the env's settings from here on
 //!   {"cmd":"step","action":{club,spin,aim,dist}}
 //!       -> {reward, done, result, strokes, penalties, ball, prev, shot, obs|null}
 //!   {"cmd":"math","x":[..],"y":[..]} -> each jsmath function over x (and y)
@@ -67,6 +69,15 @@ fn serve() {
         let req: Value = serde_json::from_str(&line).expect("bad request");
         let reply = match req["cmd"].as_str().unwrap() {
             "reset" => {
+                if let Some(c) = req.get("cfg").filter(|c| !c.is_null()) {
+                    let d = EnvCfg::default();
+                    env.cfg = EnvCfg {
+                        impact_noise: c["impactNoise"].as_f64().unwrap_or(d.impact_noise),
+                        aim_noise: c["aimNoise"].as_f64().unwrap_or(d.aim_noise),
+                        exact_solve: c["exactSolve"].as_bool().unwrap_or(d.exact_solve),
+                        ..d
+                    };
+                }
                 env.reset(spec_from(&req["spec"]));
                 let o = env.observe_vec();
                 json!({"obs": obs_json(&o), "hole": hole_json(&env.g, req["detail"].as_bool().unwrap_or(false))})
@@ -172,7 +183,7 @@ fn bench(holes: usize) {
     );
     // the batched path, as Python drives it
     let n = 256u32;
-    let h = golfsim::ffi::gs_vec_new(n, 0, 0.04, 0.015, 5, 7, 0.0, 0.3, 1);
+    let h = golfsim::ffi::gs_vec_new(n, 0, 0.04, 0.015, 5, 7, 0.0, 0.3, 1, 0);
     let mut obs = vec![0.0f32; n as usize * OBS_DIM];
     let mut info = vec![0.0f64; n as usize * golfsim::ffi::INFO_W];
     let club = vec![0i32; n as usize];

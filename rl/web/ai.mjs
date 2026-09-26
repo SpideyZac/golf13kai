@@ -35,6 +35,9 @@ if (window.RL_AUTO && !autoPlay && q.get('auto') !== '0')
 }
 
 let model = null;
+// the env rules the model trained under (py/golfrl/train.py records them as
+// meta.env): the swing noise, and whether the solver's shots skip it
+let rules = {impactNoise: .04, aimNoise: .015, exactSolve: false};
 (EMBEDDED ? Promise.resolve(EMBEDDED) : fetch(MODEL_URL).then(r => r.json())).then(j =>
 {
     if (j.obsVersion != OBS_VERSION || j.obsDim != OBS_DIM)
@@ -42,6 +45,7 @@ let model = null;
     const bin = atob(j.params), u8 = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; ++i) u8[i] = bin.charCodeAt(i);
     model = new Model(j.arch).bind(new Float32Array(u8.buffer));
+    rules = {...rules, ...j.meta?.env};
     console.log(`RL agent loaded: ${EMBEDDED ? 'embedded model' : MODEL_URL} (iter ${j.meta?.iter}, ${model.size} params)`);
     autoPlay || console.log('add ?auto=1 to the URL to let the agent play');
 }).catch(e => console.error('RL agent failed to load:', e));
@@ -84,9 +88,11 @@ window.botSwing = function aiSwing()
         // DECIDE once per shot, then line up (same camera ease as the dev bot)
         if (lastStart)
             prev = {moved: Math.hypot(ball.x - lastStart.x, ball.z - lastStart.z), ...flags};
-        // the noise the agent trained with (rl/env.mjs DEFAULT_ENV), which the
-        // solver measures its odds against
-        const obs = quietly(()=> observer.observe({strokes, prev, maxOver: 5, impactNoise: .04, aimNoise: .015}));
+        // the noise the agent trained with, which the solver measures its odds
+        // against (none for its own shots under exactSolve, as in rl/env.mjs)
+        const ex = rules.exactSolve;
+        const obs = quietly(()=> observer.observe({strokes, prev, maxOver: 5,
+            impactNoise: ex ? 0 : rules.impactNoise, aimNoise: ex ? 0 : rules.aimNoise}));
         // the mode, unless the last full swing got nowhere (the escape rule)
         const stuck = lastStart && isStuck(prev, lastPutt);
         const a = model.act(obs, Math.random, randn, !stuck);
@@ -113,9 +119,10 @@ window.botSwing = function aiSwing()
     lastPutt = shot.club == CLUB_PUTTER;
     flags.tree = flags.hazard = 0;
     const putt = shot.club == CLUB_PUTTER;
-    // the meter noise the agent trained with (rl/env.mjs DEFAULT_ENV)
-    launchBall(shot.club, shot.power, rand(.04, -.04), shot.spin,
-        shot.yaw + (putt ? 0 : rand(.015, -.015)), shot.lm);
+    // the meter noise the agent trained with (none on an exactSolve solver shot)
+    const exact = rules.exactSolve && shot.solved;
+    launchBall(shot.club, shot.power, exact ? 0 : rand(rules.impactNoise, -rules.impactNoise), shot.spin,
+        shot.yaw + (putt || exact ? 0 : rand(rules.aimNoise, -rules.aimNoise)), shot.lm);
     putt ? snd_putt.play(.4 + shot.power*.6) : snd_tee.play(.5 + shot.power*.5, .8 + shot.power*.4);
     startFlight();
 };

@@ -101,7 +101,8 @@ pub extern "C" fn gs_info_width() -> u32 {
 
 /// A batch of n envs on `threads` worker threads (0 = one per core). `seed`
 /// seeds each env's training-episode RNG. `solver` = 0 turns the solver off
-/// (its obs block is zeros and CLUB_SOLVE plays the game's club).
+/// (its obs block is zeros and CLUB_SOLVE plays the game's club), and
+/// `exact_solve` = 1 plays the solver's shots without swing noise.
 #[no_mangle]
 pub extern "C" fn gs_vec_new(
     n: u32,
@@ -113,12 +114,14 @@ pub extern "C" fn gs_vec_new(
     classic_prob: f64,
     start_prob: f64,
     solver: u8,
+    exact_solve: u8,
 ) -> *mut VecEnv {
     let cfg = EnvCfg {
         impact_noise,
         aim_noise,
         max_over,
         solver: solver != 0,
+        exact_solve: exact_solve != 0,
     };
     let slots = (0..n)
         .map(|i| Slot {

@@ -112,18 +112,19 @@ test('every classic hole and remix holes generate identically', {skip}, async ()
     rust.close();
 });
 
-test(`${HOLES} holes of play match shot for shot`, {skip, timeout: 600000}, async ()=>
+// HOLES holes under env rules cfg (the Rust side gets them with each reset)
+async function playHoles(holes, cfg, seed)
 {
-    const rust = new Rust(), env = new GolfEnv();
+    const rust = new Rust(), env = new GolfEnv(cfg);
     const {model} = loadModel(join(ROOT, 'models/agent.json'));
-    const rand = mulberry32(2026), randn = randnFrom(rand);
+    const rand = mulberry32(seed), randn = randnFrom(rand);
     let strokes = 0, events = {};
-    for (let e = 0; e < HOLES; ++e)
+    for (let e = 0; e < holes; ++e)
     {
         // half from exploring starts (sand, trees, hillsides), a few classic
         const spec = trainEpisode(rand, .15, .5);
         let obs = env.reset(spec);
-        const res = await rust.call({cmd: 'reset', spec});
+        const res = await rust.call({cmd: 'reset', spec, cfg});
         const where = `hole ${e} (${JSON.stringify(spec)})`;
         sameHole(env, res.hole, where);
         sameObs(obs, res.obs, where);
@@ -164,5 +165,13 @@ test(`${HOLES} holes of play match shot for shot`, {skip, timeout: 600000}, asyn
         }
     }
     rust.close();
-    console.log(`  parity: ${HOLES} holes, ${strokes} strokes identical`, events);
+    console.log(`  parity${Object.keys(cfg).length ? ' ' + JSON.stringify(cfg) : ''}: ${holes} holes, ${strokes} strokes identical`, events);
+}
+
+test(`${HOLES} holes of play match shot for shot`, {skip, timeout: 600000}, ()=> playHoles(HOLES, {}, 2026));
+
+test('the optional rules match too: noise-free solver shots, and no noise at all', {skip, timeout: 600000}, async ()=>
+{
+    await playHoles(Math.ceil(HOLES/3), {exactSolve: true}, 7);
+    await playHoles(Math.ceil(HOLES/6), {exactSolve: true, impactNoise: 0, aimNoise: 0}, 8);
 });

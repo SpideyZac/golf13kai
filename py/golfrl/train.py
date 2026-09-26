@@ -68,6 +68,10 @@ def parse(argv=None):
                     help='with a v3 --init: the share of shots the upgraded agent starts out playing SOLVE')
     ap.add_argument('--no-solver', dest='solver', action='store_false',
                     help='turn the solver off (its obs block is zeros, SOLVE plays the game club)')
+    ap.add_argument('--exact-solve', action='store_true',
+                    help="the solver's shots skip the swing noise, so a found solution always drops")
+    ap.add_argument('--impact-noise', type=float, default=.04, help='swing-meter timing error, every shot (0: none)')
+    ap.add_argument('--aim-noise', type=float, default=.015, help='aim error on full swings, every shot (0: none)')
     ap.add_argument('--eval-every', type=int, default=10)
     ap.add_argument('--eval-rounds', type=int, default=4)
     ap.add_argument('--seed', type=int, default=1)
@@ -116,8 +120,10 @@ def main(argv=None):
         torch.set_rng_state(state['torch_rng'])
 
     n, T = a.envs, a.steps
+    # the env rules, recorded in every checkpoint so evaluate.py and the browser play by them
+    rules = {'impactNoise': a.impact_noise, 'aimNoise': a.aim_noise, 'solver': a.solver, 'exactSolve': a.exact_solve}
     env = sim.VecEnv(n, threads=a.threads, seed=a.seed * 7919 + start_iter, classic_prob=a.classic_prob,
-                     start_prob=a.start_prob, solver=a.solver)
+                     start_prob=a.start_prob, **sim.rules_kwargs(rules))
     (run / 'config.json').write_text(json.dumps({'args': vars(a), 'arch': model.arch, 'device': str(dev),
                                                  'trainer': 'python'}, indent=2))
     log_path = run / 'log.csv'
@@ -125,7 +131,7 @@ def main(argv=None):
         log_path.write_text(','.join(LOG_COLS) + '\n')
     n_params = sum(p.numel() for p in model.parameters())
     print(f'run {a.name}: {n} envs x {T} steps = {n * T} strokes/iter on {dev}, {n_params} params,'
-          f' env threads {a.threads or os.cpu_count()}')
+          f' env threads {a.threads or os.cpu_count()}, rules {rules}')
 
     D = sim.OBS_DIM
     buf_obs = torch.zeros((T, n, D), device=dev)
@@ -146,7 +152,8 @@ def main(argv=None):
             b = float(lse.median()) + math.log(p / (1 - p))
             model.actor[-1].bias[sim.CLUB_SOLVE] = b
         print(f'upgraded {a.init} from obs v3: SOLVE bias {b:.2f} (starts at ~{p:.0%} of shots)')
-    meta = lambda it, **k: {'iter': it, 'totalSteps': total_steps, 'bestEval': best_eval, 'trainer': 'python', **k}
+    meta = lambda it, **k: {'iter': it, 'totalSteps': total_steps, 'bestEval': best_eval, 'trainer': 'python',
+                            'env': rules, **k}
 
     for it in range(start_iter, a.iters):
         t0 = time.perf_counter()
@@ -239,8 +246,8 @@ def main(argv=None):
         long_ho = np.mean(long_holes) if long_holes else 0.
         ev_c = ev_r = ''
         if a.eval_every and ((it + 1) % a.eval_every == 0 or it == a.iters - 1):
-            c = summarise(play(model, sim.eval_set('classic', a.eval_rounds), dev, threads=a.threads, solver=a.solver))
-            r = summarise(play(model, sim.eval_set('remix', a.eval_rounds), dev, threads=a.threads, solver=a.solver))
+            c = summarise(play(model, sim.eval_set('classic', a.eval_rounds), dev, threads=a.threads, rules=rules))
+            r = summarise(play(model, sim.eval_set('remix', a.eval_rounds), dev, threads=a.threads, rules=rules))
             ev_c, ev_r = f"{c['toPar']:.2f}", f"{r['toPar']:.2f}"
             print(f"  eval classic {ev_c} (best {c['best']}, worst {c['worst']}, pen {c['penalties']:.1f})"
                   f"  remix {ev_r} (pen {r['penalties']:.1f}, pickups {r['pickups']:.2f})"

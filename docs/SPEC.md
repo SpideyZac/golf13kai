@@ -62,21 +62,34 @@ Decoding follows the game's meter: `power = want / (carry(club) · lieMul(club))
 - `impactNoise` (default ±0.04, uniform): swing-meter timing error. It costs power and pushes, hooks or slices exactly as the game does. Errors under 0.02 snap to a perfect strike.
 - `aimNoise` (default ±0.015 rad, uniform): full swings only.
 
-These match the error the game's scripted dev bot is given, so their scores can be compared. A solver shot gets the same noise, since solving it does not make the swing perfect.
+These match the error the game's scripted dev bot is given, so their scores can be compared. By default a solver shot gets the same noise, since solving it does not make the swing perfect.
+
+**Optional rules** (env config, default off; the Python trainer records them in the checkpoint's `meta.env`, and `golfrl.evaluate`, `rl/eval.mjs` and the browser agent play by them):
+
+| Option | Effect |
+|---|---|
+| `exactSolve` | A solver shot (`CLUB_SOLVE` with a solution) is played with no impact or aim error, so it **always holes**. The solver then measures its odds noise-free too: P(holed) = 1 and no replays. Every other shot keeps its noise. |
+| `impactNoise` / `aimNoise` = 0 | No swing error on any shot: the game becomes fully deterministic given the hole. |
+
+The random draws are made either way, so these options change only what the draws do. The wind and the rest of the random stream are unchanged.
 
 ## Solver (`rl/solver.mjs`, `golfsim/src/solver.rs`)
 
 Runs at the end of every `observe()` (unless the env's `solver` option is off) and finds a swing that holes the ball from where it lies, wind, slopes, bounces, spin and cup included. It uses no model of the physics. It plays trial shots through the game's own `launchBall` and `ballUpdate`, the same loop `GolfEnv.step` runs (pin rule included), and puts every flight global back afterwards. That is why the browser agent can run it on the live game.
 
 1. **In range.** It runs only when the game's default shot aims at the pin (the pin within the game's club's reach + 20 yards, as in the reference shot). Otherwise it reports `tried = 0`.
-2. **Candidates.** The putter, when the ball is on the green, fairway or tee within `PUTT_MAX`. Then the game's club (`autoClub`) with no spin and with backspin. When the game hands over the putter off the green, the sand wedge takes the game's club's place.
+2. **Candidates.** The putter, when the ball is on the green, fairway or tee within `PUTT_MAX`. Then the game's club (`autoClub`) with no spin and with backspin. When the game hands over the putter off the green, the sand wedge takes the game's club's place. **Fallback:** when none of these holes, it tries the clubs up to 2 either side of that club, longest first, each with no spin, backspin and topspin, and stops at the first solution. A longer club or topspin reaches a pin the game's club can't run up to, and a shorter club can stop on a ridge.
 3. **Steering.** Start at the pin line with the pin distance as the target. Play a noise-free trial. If it holed, that is the solution. Otherwise turn the aim by the angle the ball finished off the pin line, and scale the target by pin distance ÷ yards travelled. Repeat, up to `SOLVE_ITERS` = 8 trials. It gives up on a candidate when a trial moves under 0.5 yards (a tree, a wall) or falls short at full power. Aiming for the ball to stop at the pin means it crosses the cup at crawling pace, which is the speed that drops.
 4. **Odds.** Each solution is replayed across the swing noise as weighted samples. Impact is perfect with probability 0.02/`impactNoise`, and otherwise ±the middle of [0.02, `impactNoise`]. For full swings, aim is the centres of the quarters of ±`aimNoise`. No aim sample is 0, because the exact solution always drops. Putts have no aim noise, so a perfect putt counts as holed. The result is P(holed), P(water or OB), and the expected yards left, with a holed ball counting 0.
 5. **Choice.** The candidate with the highest P(holed) wins, then the fewest yards left, then the earlier candidate.
 
-Typical odds (the default noise): putts 0.35–0.75, 40–100 yards about 0.2, and 100–200 yards about 0.01. A holing swing exists for about three quarters of in-range lies.
+A solution is **exact**: with a perfect strike (no meter error) it holes every time. P(holed) is below 1 only because of the swing noise the env applies to every shot.
 
-**Fairness.** The solver knows the exact physics, including the cup, trees and wind, which no player can see precisely. Agents that use it are not comparable with the scripted bot or with v3 agents, which see only what a player sees. It costs time as well: an in-range observation plays 10–60 trial shots, so the Rust env runs about 4× slower (6k against 27k strokes a second on 16 cores).
+It finds a solution for 85–90% of in-range lies. Nearly all the rest are unholeable on a direct line: a tree blocks every club, or no club gets there. More steering trials, bracketing the power, steering on the closest pass to the cup, and aiming past the pin were all measured and found no more solutions. Aiming past the pin found fewer.
+
+Typical odds (the default noise): putts 0.35–0.75, 40–100 yards about 0.2, and 100–200 yards about 0.01.
+
+**Fairness.** The solver knows the exact physics, including the cup, trees and wind, which no player can see precisely. Agents that use it are not comparable with the scripted bot or with v3 agents, which see only what a player sees. It costs time as well: an in-range observation plays 10–60 trial shots, so the Rust env runs about 4.5× slower (5.8k against 27k strokes a second on 16 cores).
 
 ## Observation (1389 floats)
 
