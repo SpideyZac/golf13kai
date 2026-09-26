@@ -12,7 +12,7 @@
 
 use crate::env::*;
 use crate::jsmath::Mulberry32;
-use crate::obs::{is_stuck, Action, OBS_DIM, OBS_VERSION};
+use crate::obs::{is_stuck, Action, N_CLUB_ACTIONS, OBS_DIM, OBS_VERSION};
 use rayon::prelude::*;
 
 pub const INFO_W: usize = 17;
@@ -32,7 +32,7 @@ pub const I_WANT: usize = 12;
 pub const I_POWER: usize = 13;
 pub const I_TO: usize = 14;
 pub const I_TREE: usize = 15;
-pub const I_TEE: usize = 16; // the episode started on the tee (not an exploring start)
+pub const I_SOLVED: usize = 16; // the shot played was the solver's (CLUB_SOLVE with a solution)
 
 struct Slot {
     env: GolfEnv,
@@ -74,7 +74,7 @@ impl Slot {
         info[I_POWER] = l.power;
         info[I_TO] = l.to;
         info[I_TREE] = l.tree as u8 as f64;
-        info[I_TEE] = e.spec.start.is_none() as u8 as f64;
+        info[I_SOLVED] = l.solved as u8 as f64;
         if !r.done {
             info[I_STUCK] = is_stuck(&e.prev, l.club == crate::game::CLUB_PUTTER) as u8 as f64;
             self.env.observe(obs);
@@ -100,7 +100,8 @@ pub extern "C" fn gs_info_width() -> u32 {
 }
 
 /// A batch of n envs on `threads` worker threads (0 = one per core). `seed`
-/// seeds each env's training-episode RNG.
+/// seeds each env's training-episode RNG. `solver` = 0 turns the solver off
+/// (its obs block is zeros and CLUB_SOLVE plays the game's club).
 #[no_mangle]
 pub extern "C" fn gs_vec_new(
     n: u32,
@@ -111,11 +112,13 @@ pub extern "C" fn gs_vec_new(
     seed: u32,
     classic_prob: f64,
     start_prob: f64,
+    solver: u8,
 ) -> *mut VecEnv {
     let cfg = EnvCfg {
         impact_noise,
         aim_noise,
         max_over,
+        solver: solver != 0,
     };
     let slots = (0..n)
         .map(|i| Slot {
@@ -240,7 +243,7 @@ pub unsafe extern "C" fn gs_vec_step(
                     return;
                 }
                 let a = Action {
-                    club: club[i].clamp(0, 10) as usize,
+                    club: club[i].clamp(0, N_CLUB_ACTIONS as i32 - 1) as usize,
                     spin: spin[i].clamp(0, 2) as usize,
                     // a NaN would poison the ball (and never finish a drop)
                     aim: if aim[i].is_finite() { aim[i] } else { 0.0 },

@@ -55,7 +55,9 @@ The agent observes what a player sees, in a frame pointed at the pin:
 - line-of-fire rays that show trees and walls
 - the game's own aim previews, including the putt line with its break
 
-It acts residually to the obvious shot. `aim = 0, dist = 0` means "at the pin, exactly that far", and it learns the wind, lay-ups, doglegs and break on top of that. Every swing goes through the game's `launchBall` with the same timing error the game's bot is given.
+When the pin is in range, a solver plays trial shots through the real physics until it finds the swing that holes, wind included, and works out how often that swing drops given the swing-meter error. The agent sees those odds and can choose `SOLVE` to play the solver's swing, so its own job becomes strategy: when to go for it, and where to leave the ball so the next one is makeable.
+
+For everything else it acts residually to the obvious shot. `aim = 0, dist = 0` means "at the pin, exactly that far", and it learns the wind, lay-ups, doglegs and break on top of that. Every swing goes through the game's `launchBall` with the same timing error the game's bot is given.
 
 See [docs/SPEC.md](docs/SPEC.md) for the environment contract, [docs/DESIGN.md](docs/DESIGN.md) for the reasoning, and [docs/TRAINING.md](docs/TRAINING.md) for how to train and the results log.
 
@@ -67,6 +69,7 @@ golfsim/        the game's physics + the env in Rust (bit-exact), C ABI, parity 
 py/golfrl/      PyTorch: PPO trainer, evaluation, the ctypes env, checkpoint I/O
 rl/sim/         loads the game's physics headless; the shared accessor list
 rl/obs.mjs      observation + action decoding (Node and browser)
+rl/solver.mjs   the holing-shot solver (Node and browser; golfsim/src/solver.rs is its twin)
 rl/env.mjs      GolfEnv (episode = hole), the reference the Rust port is tested against
 rl/nn.mjs       MLP, Adam
 rl/policy.mjs   actor/critic, hybrid action distribution, PPO gradient

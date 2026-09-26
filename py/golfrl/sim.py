@@ -15,11 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 # info columns (ffi.rs I_*)
 REWARD, DONE, RESULT, STROKES, PAR, PENALTIES, HOLED, STUCK = range(8)
 CLUB, SPIN, LIE, FROM, WANT, POWER, TO, TREE = range(8, 16)
-TEE = 16  # the episode started on the tee (not an exploring start)
+SOLVED = 16  # the shot played was the solver's (CLUB_SOLVE with a solution)
 RESULTS = ['holed', 'stopped', 'water', 'ob']
 LIES = ['ROUGH', 'FAIRWAY', 'GREEN', 'TEE', 'SAND', 'WATER', 'OB']
 CLUB_NAMES = ['1W', '3W', '5W', '3i', '5i', '7i', '9i', '13i', 'PW', 'SW', 'PT']
 N_CLUBS, N_SPIN = 11, 3
+CLUB_SOLVE = N_CLUBS            # the club head's extra choice: the solver's shot
+N_CLUB_ACTIONS = N_CLUBS + 1
 CLASSIC_SEED = 1113
 
 
@@ -40,7 +42,7 @@ def _load():
     lib.gs_obs_dim.restype = U
     lib.gs_info_width.restype = U
     lib.gs_vec_new.restype = P
-    lib.gs_vec_new.argtypes = [U, U, D, D, I, U, D, D]
+    lib.gs_vec_new.argtypes = [U, U, D, D, I, U, D, D, U8]
     lib.gs_vec_free.argtypes = [P]
     lib.gs_vec_reset_train.argtypes = [P, F]
     lib.gs_vec_reset_spec.argtypes = [P, U, D, U8, U, U, U8, D, D, F]
@@ -52,7 +54,7 @@ _lib = _load()
 OBS_VERSION = _lib.gs_obs_version()
 OBS_DIM = _lib.gs_obs_dim()
 INFO_W = _lib.gs_info_width()
-if INFO_W <= TEE:
+if INFO_W <= SOLVED:
     raise ImportError(f'{_lib_path()} is out of date (info width {INFO_W}): npm run build:sim')
 
 
@@ -68,10 +70,10 @@ class VecEnv:
     """
 
     def __init__(self, n, threads=0, impact_noise=.04, aim_noise=.015, max_over=5, seed=1,
-                 classic_prob=0., start_prob=.3):
+                 classic_prob=0., start_prob=.3, solver=True):
         self.n = n
         self._h = _lib.gs_vec_new(n, threads, impact_noise, aim_noise, max_over, seed & 0xFFFFFFFF,
-                                  classic_prob, start_prob)
+                                  classic_prob, start_prob, int(bool(solver)))
         self.obs = np.zeros((n, OBS_DIM), np.float32)
         self.info = np.zeros((n, INFO_W), np.float64)
 

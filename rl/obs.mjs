@@ -2,11 +2,17 @@
 // and the in-browser agent (rl/web/ai.mjs). Pure: it only talks to the game
 // through G, the accessor object from rl/sim/api.mjs. Contract: docs/SPEC.md -
 // bump OBS_VERSION with any change to what observe() writes or decode() means.
+import { Solver } from './solver.mjs';
 
-export const OBS_VERSION = 3;
+export const OBS_VERSION = 4;
 export const CLASSIC_SEED = 1113;
 export const N_CLUBS = 11, N_SPIN = 3;
 export const CLUB_NAMES = ['1W', '3W', '5W', '3i', '5i', '7i', '9i', '13i', 'PW', 'SW', 'PT'];
+// The club head has one more choice than the bag: CLUB_SOLVE plays the
+// solver's holing shot (rl/solver.mjs) when it found one, and otherwise the
+// game's club with the action's spin, aim and distance.
+export const CLUB_SOLVE = N_CLUBS, N_CLUB_ACTIONS = N_CLUBS + 1;
+export const ACTION_NAMES = [...CLUB_NAMES, 'SOLVE'];
 
 // Action decoding (see SPEC.md), RESIDUAL TO THE GAME'S DEFAULT SHOT (the aim
 // line and target the game sets up for a player, see reference()):
@@ -33,9 +39,10 @@ const LOOK = Array.from({length: 10}, (_, i)=> 30 + 30*i);
 const RAYS = Array.from({length: 13}, (_, i)=> (i - 6)*Math.PI/18);
 const RAY_LEN = 80, RAY_STEPS = [4, 8, 14, 22, 32, 45, 60];
 const CH = 6; // grid channels: hazard, sand, green, short grass, tree, height
+const SOLVE_DIM = 6;
 
 export const OBS_DIM = 7 + 2 + 2 + 3 + 3 + 2 + 1 + 3 + 11 + 3 + 3 + 2*RAYS.length + 6
-    + 8 + 5 + 2*LOOK.length + CH*(GA_FWD.length*GA_LAT.length + GB_FWD.length*GB_LAT.length);
+    + 8 + 5 + 2*LOOK.length + CH*(GA_FWD.length*GA_LAT.length + GB_FWD.length*GB_LAT.length) + SOLVE_DIM;
 
 // THE ESCAPE RULE for deterministic play: after a full swing that moved the
 // ball under ESCAPE_YD or found a hazard, the next shot is SAMPLED from the
@@ -51,13 +58,17 @@ export const clip = (v, lo, hi)=> v < lo ? lo : v > hi ? hi : v;
 const TREE_CELL = 8;
 
 // One per game instance. Call newHole() after every genHole; observe() reads
-// the round state it is handed: {strokes, prev: {moved, tree, hazard}, maxOver}.
+// the round state it is handed: {strokes, prev: {moved, tree, hazard}, maxOver}
+// and the solver's settings: {impactNoise, aimNoise, solve} (the swing noise
+// its hole odds are measured against, and whether it runs at all).
 export class Observer
 {
     constructor(G)
     {
         this.G = G;
         this.obs = new Float32Array(OBS_DIM);
+        this.solver = new Solver(G);
+        this.solution = null;
     }
 
     newHole()
@@ -112,7 +123,7 @@ export class Observer
         return {club, dir: Math.atan2(t.x-b.x, t.z-b.z), dist: Math.max(1, Math.hypot(t.x-b.x, t.z-b.z))};
     }
 
-    observe({strokes, prev, maxOver})
+    observe({strokes, prev, maxOver, impactNoise = .04, aimNoise = .015, solve = true})
     {
         const G = this.G, h = this.h, b = G.ball, o = this.obs;
         let i = 0;
@@ -201,6 +212,17 @@ export class Observer
         for (const f of GB_FWD)
             for (const l of GB_LAT)
                 cell(...A.toW(f, l), 15);
+        // 6: the solver - did it run (pin in range), did it find a holing
+        // swing, and that swing's odds across the swing noise: holed, in a
+        // hazard, the expected yards left (0 when it drops), and whether it
+        // is a putt
+        const s = this.solution = solve ? this.solver.solve({impactNoise, aimNoise}) : {tried: 0, found: 0};
+        put(s.tried); put(s.found);
+        if (s.found)
+        {
+            put(s.pHole); put(s.pHazard); put(Math.log1p(s.leave)/4); put(s.club == G.CLUB_PUTTER ? 1 : 0);
+        }
+        else { put(0); put(0); put(0); put(0); }
         if (i != OBS_DIM) throw new Error(`obs size ${i} != ${OBS_DIM}`);
         return o;
     }
@@ -248,15 +270,24 @@ export class Observer
 
     // Decode a raw action into the shot the game will play. Relative to the
     // reference of the LAST observe() - the state the action was chosen in.
+    // CLUB_SOLVE plays that observe()'s solution as is (aim and dist unused),
+    // or, with none, the game's club.
     decode({club, spin, aim, dist})
     {
         const G = this.G, ref = this.ref ?? this.reference();
+        if (club == CLUB_SOLVE)
+        {
+            const s = this.solution;
+            if (s?.found)
+                return {club: s.club, spin: s.spin, yaw: s.yaw, power: s.power, lm: s.lm, want: s.want, solved: 1};
+            club = ref.club;
+        }
         const yaw = ref.dir + AIM_SCALE*clip(aim, -AIM_CLIP, AIM_CLIP);
         const want = Math.max(.3, ref.dist*Math.exp(DIST_SCALE*clip(dist, DIST_LO, DIST_HI)));
         const lm = G.lieMul(club);
         const power = club == G.CLUB_PUTTER
             ? clip(want/G.PUTT_MAX, .005, 1)
             : clip(want/(G.CLUBS[club][1]*lm), .02, 1);
-        return {club, spin: club == G.CLUB_PUTTER ? 0 : spin - 1, yaw, power, lm, want};
+        return {club, spin: club == G.CLUB_PUTTER ? 0 : spin - 1, yaw, power, lm, want, solved: 0};
     }
 }

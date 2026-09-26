@@ -13,6 +13,7 @@ export const DEFAULT_ENV = {
     impactNoise: .04,  // uniform +- swing meter timing error (the scripted bot's)
     aimNoise: .015,    // uniform +- radians on full swings (the scripted bot's)
     maxOver: 5,        // the game's mercy rule: pick up at par+5
+    solver: true,      // run the solver (rl/solver.mjs) in every observation
 };
 
 export class GolfEnv
@@ -69,10 +70,15 @@ export class GolfEnv
     }
 
     pinDist() { return this.observer.pinDist(); }
-    observe() { return this.observer.observe({strokes: this.strokes, prev: this.prev, maxOver: this.cfg.maxOver}); }
+    observe()
+    {
+        const c = this.cfg;
+        return this.observer.observe({strokes: this.strokes, prev: this.prev, maxOver: c.maxOver,
+            impactNoise: c.impactNoise, aimNoise: c.aimNoise, solve: c.solver});
+    }
     decode(action) { return this.observer.decode(action); }
 
-    // action: {club 0-10, spin 0-2 (back/none/top), aim, dist}
+    // action: {club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim, dist}
     // returns {obs, reward, done, info}
     step(action)
     {
@@ -105,11 +111,11 @@ export class GolfEnv
         this.prev = {moved: Math.hypot(b.x - G.shotStart.x, b.z - G.shotStart.z),
             tree: G.treeHit ? 1 : 0, hazard: result == 'water' || result == 'ob' ? 1 : 0};
         this.log.push({club: G.CLUBS[s.club][0], spin: s.spin, lie, from: d0, want: s.want,
-            power: s.power, result, to: this.pinDist(), tree: G.treeHit});
+            power: s.power, result, to: this.pinDist(), tree: G.treeHit, solved: s.solved});
         if (ev == G.EV_HOLED || this.strokes >= this.h.par + cfg.maxOver)
             this.done = true;
         return {obs: this.done ? null : this.observe(), reward, done: this.done,
-            info: {result, strokes: this.strokes, par: this.h.par, holed: ev == G.EV_HOLED}};
+            info: {result, strokes: this.strokes, par: this.h.par, holed: ev == G.EV_HOLED, solved: s.solved}};
     }
 
     // Penalty drop, verbatim from game.js updateFlight: walk back along the shot

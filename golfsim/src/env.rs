@@ -4,7 +4,8 @@
 
 use crate::game::*;
 use crate::jsmath::{self as jm, hypot2};
-use crate::obs::{self, Action, Prev, Reference, Shot, OBS_DIM};
+use crate::obs::{self, Action, Prev, Reference, Shot, SolveCfg, OBS_DIM};
+use crate::solver::Solution;
 
 pub const CLASSIC_SEED: f64 = 1113.0;
 pub const TRAIN_SEED_MIN: f64 = 1000.0;
@@ -18,6 +19,8 @@ pub struct EnvCfg {
     pub aim_noise: f64,
     /// the game's mercy rule: pick up at par + max_over
     pub max_over: i32,
+    /// run the solver (solver.rs) in every observation
+    pub solver: bool,
 }
 
 impl Default for EnvCfg {
@@ -26,6 +29,7 @@ impl Default for EnvCfg {
             impact_noise: 0.04,
             aim_noise: 0.015,
             max_over: 5,
+            solver: true,
         }
     }
 }
@@ -60,6 +64,8 @@ pub struct ShotLog {
     pub result: u8,
     pub to: f64,
     pub tree: bool,
+    /// the solver's shot was played
+    pub solved: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -81,6 +87,8 @@ pub struct GolfEnv {
     pub spec: Spec,
     pub log: Vec<ShotLog>,
     pub reference: Option<Reference>,
+    /// the solver's result in the last observe()
+    pub solution: Solution,
 }
 
 impl GolfEnv {
@@ -101,6 +109,7 @@ impl GolfEnv {
             },
             log: Vec::new(),
             reference: None,
+            solution: Solution::default(),
         }
     }
 
@@ -129,6 +138,7 @@ impl GolfEnv {
         self.prev = Prev::default();
         self.spec = spec;
         self.reference = None;
+        self.solution = Solution::default();
     }
 
     /// Exploring start: u along the centreline, (2v-1)*60 yards across it,
@@ -171,8 +181,15 @@ impl GolfEnv {
 
     /// The observation of the current state, into `o` (OBS_DIM floats).
     pub fn observe(&mut self, o: &mut [f32]) {
-        let r = obs::observe(&mut self.g, self.strokes, &self.prev, self.cfg.max_over, o);
+        let c = self.cfg;
+        let sc = SolveCfg {
+            impact_noise: c.impact_noise,
+            aim_noise: c.aim_noise,
+            on: c.solver,
+        };
+        let (r, sol) = obs::observe(&mut self.g, self.strokes, &self.prev, c.max_over, &sc, o);
         self.reference = Some(r);
+        self.solution = sol;
     }
 
     pub fn observe_vec(&mut self) -> Vec<f32> {
@@ -190,7 +207,7 @@ impl GolfEnv {
                 r
             }
         };
-        obs::decode(&self.g, &r, a)
+        obs::decode(&self.g, &r, &self.solution, a)
     }
 
     /// One stroke. The next observation is observe()'s job (not when done).
@@ -253,11 +270,13 @@ impl GolfEnv {
             result,
             to,
             tree: g.tree_hit,
+            solved: s.solved,
         });
         if ev == EV_HOLED || self.strokes >= self.g.hole.par + cfg.max_over {
             self.done = true;
         }
         self.reference = None;
+        self.solution = Solution::default();
         StepResult {
             reward,
             done: self.done,

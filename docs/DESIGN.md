@@ -12,7 +12,7 @@ The first version was pure Node.js with zero dependencies: hand-written MLP and 
 
 ## The Rust port (`golfsim/`)
 
-The rule that the agent must play exactly what the browser runs still holds. It is now enforced by a test rather than by loading the source: `rl/test/parity.test.mjs` plays the same holes through the JS env (the game's own code) and through Rust, and requires `===` on every hole layout, every ball position and all 1383 observation floats after every stroke. Tolerances would have let porting bugs hide behind "float noise". Bit-exactness leaves no room for them, and it held over 1500 holes and 6145 strokes, with 731 tree strikes, 131 splashes and 175 OB.
+The rule that the agent must play exactly what the browser runs still holds. It is now enforced by a test rather than by loading the source: `rl/test/parity.test.mjs` plays the same holes through the JS env (the game's own code) and through Rust, and requires `===` on every hole layout, every ball position and every observation float (1383 in v3, 1389 in v4) after every stroke. Tolerances would have let porting bugs hide behind "float noise". Bit-exactness leaves no room for them, and it held over 1500 holes and 6145 strokes, with 731 tree strikes, 131 splashes and 175 OB.
 
 Getting there took three things:
 
@@ -30,14 +30,14 @@ It is faster than the JS without changing a result. The value-noise lattice hash
 
 ## Problem framing
 
-- **One episode per hole, one step per stroke.** Holes are short: about 4 steps, and at most par+5 plus a penalty. The reward is −1 per stroke plus penalties, with γ = 1, so the return is exactly minus the score. There is no reward shaping by default. The critic learns expected strokes-to-hole from the state, which is the natural value function of golf. The optional hero mode (`--hero`, `py/golfrl/hero.py`) is the one exception. It adds bounded bonuses for long hole-outs, near misses from far and beating birdie, so the agent plays aggressively. It is applied in the trainer and not in the env, so parity is untouched, and evals and checkpoint selection still use the true score.
+- **One episode per hole, one step per stroke.** Holes are short: about 4 steps, and at most par+5 plus a penalty. The reward is −1 per stroke plus penalties, with γ = 1, so the return is exactly minus the score. There is no reward shaping. The critic learns expected strokes-to-hole from the state, which is the natural value function of golf.
 - **Procedural training distribution.** Every training episode is a random hole of a random remix course, and there are about 2M × 18 layouts. The classic course and the low remix seeds are held out, so eval numbers measure generalisation, not memorisation.
 
 ## Action parameterisation
 
 The raw action is **residual to the game's default shot**. `aim = 0, dist = 0` means the aim line and target the game sets up for a player (`aimDefault`): the pin when the suggested club can reach it, otherwise a lay-up one carry down the centreline. The network learns the corrections: wind, lines, break, and pace over or under. (v1–v2 were residual to the pin, which failed on hairpins. See below.)
 
-- The club is absolute, a categorical over 11. The game's own pre-selected club is in the observation, so "use the suggested club" is a single linear feature to pick up.
+- The club is absolute, a categorical over 11, plus (v4) a 12th choice, `SOLVE`, that hands the swing to the solver (below). The game's own pre-selected club is in the observation, so "use the suggested club" is a single linear feature to pick up.
 - Aim is ±60° around the default line, so escapes are reachable, and the state-dependent log std lets putts get sub-degree precise while drives stay loose.
 - Distance is multiplicative (`exp`) because shot lengths span 1 to 600 yards.
 - Everything goes through the game's `launchBall` with swing-meter timing noise. The agent never gets a perfect strike for free, the same deal the scripted bot gets.
@@ -49,6 +49,16 @@ The player's view, in two frames: the default aim line for everything about this
 - **Two terrain grids.** One is scaled to the pin distance: on a 6-yard putt it samples the green's contour at sub-yard spacing, and on a drive it spans the hole. The other is fixed in yards over full-swing landing zones. Channels: hazard, sand, green, short grass, tree canopy, relative height.
 - **The game's own aim previews.** The putt line with its break at two paces, and the still-air flight ring of the suggested club. A human reads these off the screen, so they are fair, and they turn putting from "infer the break from heights" into "correct the previewed miss".
 - **v2 line-of-fire rays and last-shot memory.** These fix a deterministic loop in which v1 kept striking a tree it could not resolve.
+
+## The solver (v4)
+
+The goal was an agent that holes long shots by reading the wind perfectly, trained on nothing but −1 per stroke. Reward shaping for hero shots (a trainer-side bonus, briefly tried as `--hero`) pushed toward risk without teaching precision. So precision became a tool: a solver that computes the holing swing, and an action that uses it. The policy's job becomes strategy, deciding when a solver shot is worth it and which positions give it good odds.
+
+- **Solve by simulation, not by model.** The physics is deterministic given the hole's wind: nothing in `ballUpdate` draws a random number. Trial shots through the real `launchBall`/`ballUpdate` are exact, and a shooting method converges in a few trials. It turns the aim by the angle of the miss and scales the target by distance ratio, aiming for the ball to *stop* at the pin, which crosses the cup at crawling pace. Bounces and slopes make the map non-smooth, so it sometimes fails, and then it says so.
+- **Honest odds.** A noise-free solution is not a promise, because the swing meter still errs. Each solution is replayed at weighted noise samples. The first version sampled aim at 0 as well, which is the solution itself, so it credited every 150-yard iron with a third of a chance. The aim samples now avoid 0.
+- **An action, not an override.** The env never plays the solver on its own. `SOLVE` is a 12th club logit, and the solver's result is in the observation, so PPO learns when it pays. No action masking is needed: `SOLVE` without a solution falls back to the game's club.
+- **One solver, two hosts, bit for bit.** The observation includes the solver's numbers, so `rl/solver.mjs` (browser, JS env) and `golfsim/src/solver.rs` (training) must agree exactly, and the parity test plays a quarter of its shots as `SOLVE`. In the browser it runs on the live game between frames. It saves and restores every flight global, and the bounce sound is muted for the duration.
+- **Lossless upgrade.** New inputs are appended with zero weights and the `SOLVE` logit is inserted with zero weights, so a v3 agent upgrades to v4 unchanged. Fine-tuning then starts from a strong player instead of from scratch, and the trainer calibrates the new logit's bias so `SOLVE` gets explored.
 
 ## Learning algorithm
 
@@ -66,6 +76,7 @@ PPO with GAE (λ = 0.95), a clipped surrogate (0.2), separate actor and critic M
 | v2, r2 | Line-of-fire rays and last-shot memory | Still got stuck, because tee-only training rarely visits trouble |
 | r3 | **Exploring starts**: 30% of episodes begin at a random playable spot | Better, but pickups remained on hairpins. The pin line crosses the woods, and ±60° of pin-relative aim cannot follow the fairway. |
 | v3, r4 | **Actions residual to the game's default shot** (`aimDefault`), with shot-specific features in its aim frame | −9.9 / −9.4, about 7–8 strokes per round better than the scripted bot |
+| v4 | **The solver** and the `SOLVE` action, still −1 per stroke | Not trained yet. See TRAINING.md. |
 
 The v3 change mattered most. With the game's own default as the zero action, the sensible shot is the prior and the network learns corrections. Even untrained, the default shot scores about +7 on classic, against +27 for aiming at the pin.
 

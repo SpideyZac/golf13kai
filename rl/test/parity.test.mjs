@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { GolfEnv, OBS_DIM } from '../env.mjs';
+import { GolfEnv, OBS_DIM, N_CLUB_ACTIONS, CLUB_SOLVE } from '../env.mjs';
 import { loadModel } from '../checkpoint.mjs';
 import { mulberry32 } from '../sim/loader.mjs';
 import { randnFrom } from '../nn.mjs';
@@ -25,7 +25,7 @@ const HOLES = +(process.env.PARITY_HOLES ?? 120);
 // obs index -> block name, for readable failures (layout: docs/SPEC.md)
 const BLOCKS = [['lie', 7], ['lieCost', 2], ['wind', 2], ['par', 3], ['round', 3], ['slope', 2], ['pinH', 1],
     ['pinDist', 3], ['club', 11], ['path', 3], ['lastShot', 3], ['rays', 26], ['vsPin', 6], ['putt', 8],
-    ['flight', 5], ['centreline', 20], ['gridA', 648], ['gridB', 630]];
+    ['flight', 5], ['centreline', 20], ['gridA', 648], ['gridB', 630], ['solver', 6]];
 const blockOf = (i)=> { for (const [n, k] of BLOCKS) { if (i < k) return `${n}[${i}]`; i -= k; } };
 
 class Rust
@@ -127,12 +127,15 @@ test(`${HOLES} holes of play match shot for shot`, {skip, timeout: 600000}, asyn
         const where = `hole ${e} (${JSON.stringify(spec)})`;
         sameHole(env, res.hole, where);
         sameObs(obs, res.obs, where);
-        // the shipped policy, sampled, with every fifth shot random instead:
-        // odd clubs and spins, putts from off the green, wild aims
+        // the shipped policy, sampled, with every fifth shot random instead
+        // (odd clubs and spins, putts from off the green, wild aims) and one
+        // in four the solver's shot, so its swings are compared too
         for (let s = 0; ; ++s)
         {
-            const a = rand() < .2
-                ? {club: Math.floor(rand()*11), spin: Math.floor(rand()*3), aim: (rand()*2 - 1)*3, dist: rand()*6 - 4}
+            const u = rand();
+            const a = u < .2
+                ? {club: Math.floor(rand()*N_CLUB_ACTIONS), spin: Math.floor(rand()*3), aim: (rand()*2 - 1)*3, dist: rand()*6 - 4}
+                : u < .45 ? {club: CLUB_SOLVE, spin: Math.floor(rand()*3), aim: 0, dist: 0}
                 : model.act(obs, rand, randn, false);
             const action = {club: a.club, spin: a.spin, aim: a.aim, dist: a.dist};
             const js = env.step(action);
@@ -149,6 +152,9 @@ test(`${HOLES} holes of play match shot for shot`, {skip, timeout: 600000}, asyn
             assert.equal(rs.prev[1], env.prev.tree, `${at}: tree`);
             assert.equal(rs.shot.lie, sh.lie, `${at}: lie`);
             assert.ok(Object.is(rs.shot.power, sh.power) && Object.is(rs.shot.want, sh.want), `${at}: decode`);
+            assert.equal(rs.shot.solved, sh.solved, `${at}: solved`);
+            events.solved = (events.solved ?? 0) + sh.solved;
+            events.solvedIn = (events.solvedIn ?? 0) + (sh.solved && js.info.result == 'holed' ? 1 : 0);
             events[js.info.result] = (events[js.info.result] ?? 0) + 1;
             events.tree = (events.tree ?? 0) + env.prev.tree;
             ++strokes;

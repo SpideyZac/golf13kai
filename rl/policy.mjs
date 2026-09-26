@@ -1,13 +1,14 @@
 // The agent: an actor MLP producing a HYBRID action distribution and a
 // separate critic MLP, both over one flat parameter buffer.
 //
-// Actor output layout (HEAD = 18):
-//   [0..10]  club logits       categorical over the 11 clubs (10 = putter)
-//   [11..13] spin logits       categorical back / none / top
-//   [14,15]  mu                Gaussian means of (aim, dist)
-//   [16,17]  log std           state dependent, clamped to [LS_MIN, LS_MAX]
+// Actor output layout (HEAD = 19):
+//   [0..11]  club logits       categorical over the 11 clubs (10 = putter)
+//                              and 11 = CLUB_SOLVE, the solver's shot
+//   [12..14] spin logits       categorical back / none / top
+//   [15,16]  mu                Gaussian means of (aim, dist)
+//   [17,18]  log std           state dependent, clamped to [LS_MIN, LS_MAX]
 import { MLP, randnFrom } from './nn.mjs';
-import { OBS_DIM, N_CLUBS, N_SPIN } from './obs.mjs';
+import { OBS_DIM, N_CLUB_ACTIONS as N_CLUBS, N_SPIN } from './obs.mjs';
 
 export const HEAD = N_CLUBS + N_SPIN + 4;
 const C0 = 0, S0 = N_CLUBS, MU = N_CLUBS + N_SPIN, LS = MU + 2;

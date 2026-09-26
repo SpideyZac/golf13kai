@@ -5,10 +5,14 @@
 
 use crate::game::*;
 use crate::jsmath::{self as jm, hypot2, js_max, js_min};
+use crate::solver::{self, Solution};
 
-pub const OBS_VERSION: u32 = 3;
+pub const OBS_VERSION: u32 = 4;
 pub const N_CLUBS: usize = 11;
 pub const N_SPIN: usize = 3;
+/// the club head's extra choice: the solver's shot (obs.mjs CLUB_SOLVE)
+pub const CLUB_SOLVE: usize = N_CLUBS;
+pub const N_CLUB_ACTIONS: usize = N_CLUBS + 1;
 
 pub const AIM_SCALE: f64 = 0.35;
 pub const AIM_CLIP: f64 = 3.0;
@@ -25,6 +29,7 @@ const N_RAYS: usize = 13;
 const RAY_LEN: f64 = 80.0;
 const RAY_STEPS: [f64; 7] = [4.0, 8.0, 14.0, 22.0, 32.0, 45.0, 60.0];
 const CH: usize = 6;
+const SOLVE_DIM: usize = 6;
 
 pub const OBS_DIM: usize = 7
     + 2
@@ -42,7 +47,8 @@ pub const OBS_DIM: usize = 7
     + 8
     + 5
     + 2 * N_LOOK
-    + CH * (GA_FWD.len() * GA_LAT.len() + N_GB_FWD * GB_LAT.len());
+    + CH * (GA_FWD.len() * GA_LAT.len() + N_GB_FWD * GB_LAT.len())
+    + SOLVE_DIM;
 
 pub const ESCAPE_YD: f64 = 10.0;
 
@@ -78,7 +84,7 @@ pub struct Reference {
     pub dist: f64,
 }
 
-/// A raw action: club 0-10, spin 0-2 (back/none/top), aim, dist.
+/// A raw action: club 0-11 (11 = CLUB_SOLVE), spin 0-2 (back/none/top), aim, dist.
 #[derive(Clone, Copy, Debug)]
 pub struct Action {
     pub club: usize,
@@ -96,6 +102,16 @@ pub struct Shot {
     pub power: f64,
     pub lm: f64,
     pub want: f64,
+    /// the solver's shot (CLUB_SOLVE with a solution)
+    pub solved: bool,
+}
+
+/// The solver settings observe() runs with (Observer.observe's options).
+#[derive(Clone, Copy, Debug)]
+pub struct SolveCfg {
+    pub impact_noise: f64,
+    pub aim_noise: f64,
+    pub on: bool,
 }
 
 /// An observation frame: +fwd along the angle a, +lat to its right.
@@ -168,7 +184,23 @@ pub fn reference(g: &mut Game) -> Reference {
 }
 
 /// Observer.decode: a raw action into the shot, relative to the reference.
-pub fn decode(g: &Game, r: &Reference, a: &Action) -> Shot {
+/// CLUB_SOLVE plays the solution as is, or with none the game's club.
+pub fn decode(g: &Game, r: &Reference, sol: &Solution, a: &Action) -> Shot {
+    let mut a = *a;
+    if a.club == CLUB_SOLVE {
+        if sol.found {
+            return Shot {
+                club: sol.club,
+                spin: sol.spin,
+                yaw: sol.yaw,
+                power: sol.power,
+                lm: sol.lm,
+                want: sol.want,
+                solved: true,
+            };
+        }
+        a.club = r.club;
+    }
     let yaw = r.dir + AIM_SCALE * clip(a.aim, -AIM_CLIP, AIM_CLIP);
     let want = js_max(0.3, r.dist * jm::exp(DIST_SCALE * clip(a.dist, DIST_LO, DIST_HI)));
     let lm = g.lie_mul(a.club);
@@ -188,6 +220,7 @@ pub fn decode(g: &Game, r: &Reference, a: &Action) -> Shot {
         power,
         lm,
         want,
+        solved: false,
     }
 }
 
@@ -281,8 +314,8 @@ fn rays(g: &Game, dir: f64, hb: f64, p: &mut Put) {
 }
 
 /// Observer.observe: writes OBS_DIM floats into `o` and returns the reference
-/// shot that decode() is relative to.
-pub fn observe(g: &mut Game, strokes: i32, prev: &Prev, max_over: i32, o: &mut [f32]) -> Reference {
+/// shot that decode() is relative to, and the solver's solution.
+pub fn observe(g: &mut Game, strokes: i32, prev: &Prev, max_over: i32, solve: &SolveCfg, o: &mut [f32]) -> (Reference, Solution) {
     assert_eq!(o.len(), OBS_DIM);
     let d = pin_dist(g);
     let pdir = pin_dir(g);
@@ -402,6 +435,23 @@ pub fn observe(g: &mut Game, strokes: i32, prev: &Prev, max_over: i32, o: &mut [
             cell(&mut p, x, z, 15.0);
         }
     }
+    let sol = if solve.on {
+        solver::solve(g, solve.impact_noise, solve.aim_noise)
+    } else {
+        Solution::default()
+    };
+    p.flag(sol.tried);
+    p.flag(sol.found);
+    if sol.found {
+        p.put(sol.p_hole);
+        p.put(sol.p_hazard);
+        p.put(jm::log1p(sol.leave) / 4.0);
+        p.flag(sol.club == CLUB_PUTTER);
+    } else {
+        for _ in 0..4 {
+            p.put(0.0);
+        }
+    }
     assert_eq!(p.i, OBS_DIM);
-    r
+    (r, sol)
 }

@@ -93,7 +93,8 @@ fn serve() {
                     "ball": [b.x, b.y, b.z],
                     "prev": [env.prev.moved, env.prev.tree as u8, env.prev.hazard as u8],
                     "shot": {"club": CLUBS[l.club].0, "spin": l.spin, "lie": SURF_NAMES[l.lie as usize],
-                             "from": l.from, "want": l.want, "power": l.power, "to": l.to, "tree": l.tree as u8},
+                             "from": l.from, "want": l.want, "power": l.power, "to": l.to, "tree": l.tree as u8,
+                             "solved": l.solved as u8},
                     "obs": obs,
                 })
             }
@@ -171,7 +172,7 @@ fn bench(holes: usize) {
     );
     // the batched path, as Python drives it
     let n = 256u32;
-    let h = golfsim::ffi::gs_vec_new(n, 0, 0.04, 0.015, 5, 7, 0.0, 0.3);
+    let h = golfsim::ffi::gs_vec_new(n, 0, 0.04, 0.015, 5, 7, 0.0, 0.3, 1);
     let mut obs = vec![0.0f32; n as usize * OBS_DIM];
     let mut info = vec![0.0f64; n as usize * golfsim::ffi::INFO_W];
     let club = vec![0i32; n as usize];

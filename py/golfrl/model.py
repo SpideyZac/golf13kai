@@ -1,9 +1,14 @@
 """The agent in PyTorch: the same networks and action distribution as
 rl/policy.mjs, so that a checkpoint trained here plays in the browser.
 
-Actor output (HEAD = 18): club logits [0:11], spin logits [11:14], Gaussian
-means of (aim, dist) [14:16], their log stds [16:18] clamped to [LS_MIN,
-LS_MAX]. The critic is a separate MLP. Hidden layers are tanh.
+Actor output (HEAD = 19): club logits [0:12] (the 11 clubs, then CLUB_SOLVE,
+the solver's shot), spin logits [12:15], Gaussian means of (aim, dist)
+[15:17], their log stds [17:19] clamped to [LS_MIN, LS_MAX]. The critic is a
+separate MLP. Hidden layers are tanh.
+
+A v3 checkpoint (before the solver) upgrades to v4 losslessly: zero weights
+for the new observation inputs and a SOLVE logit with zero weights and a
+chosen bias (upgrade_v3, and python -m golfrl.upgrade).
 
 Checkpoints use the JS format (rl/checkpoint.mjs): the parameters as ONE flat
 float32 array in the JS layout - per layer W as [in][out] then b, actor first,
@@ -18,7 +23,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .sim import OBS_DIM, OBS_VERSION, N_CLUBS, N_SPIN
+from .sim import OBS_DIM, OBS_VERSION, N_CLUB_ACTIONS as N_CLUBS, CLUB_SOLVE, N_SPIN
 
 HEAD = N_CLUBS + N_SPIN + 4
 C0, S0, MU, LS = 0, N_CLUBS, N_CLUBS + N_SPIN, N_CLUBS + N_SPIN + 2
@@ -106,12 +111,49 @@ def save_js(path, model, meta):
     tmp.replace(path)
 
 
-def load_js(path):
+# v3 (before the solver): 6 fewer observation floats (the solver block is the
+# last one) and no SOLVE logit
+V3_OBS_DIM, V3_HEAD = OBS_DIM - 6, HEAD - 1
+
+
+def upgrade_v3(flat, hidden, solve_logit):
+    """A v3 flat parameter array as v4: the new inputs get zero weights in
+    both first layers, and the actor gets a SOLVE logit at CLUB_SOLVE with zero
+    weights and bias `solve_logit`. Every old output is unchanged, so the
+    upgraded agent plays exactly as before while SOLVE is at -20; a higher bias
+    makes it try the solver's shot from the start."""
+    flat = np.asarray(flat, np.float32)
+    out, o = [], 0
+    for net_out in (V3_HEAD, 1):
+        sizes = [V3_OBS_DIM, *hidden, net_out]
+        for li in range(len(sizes) - 1):
+            n, k = sizes[li], sizes[li + 1]
+            W = flat[o:o + n * k].reshape(n, k)
+            o += n * k
+            b = flat[o:o + k]
+            o += k
+            if li == 0:
+                W = np.concatenate([W, np.zeros((OBS_DIM - V3_OBS_DIM, k), np.float32)])
+            if net_out == V3_HEAD and li == len(sizes) - 2:
+                W = np.insert(W, CLUB_SOLVE, 0., axis=1)
+                b = np.insert(b, CLUB_SOLVE, solve_logit)
+            out += [W.ravel(), b]
+    if o != flat.size:
+        raise ValueError(f'v3 checkpoint has {flat.size} params, expected {o}')
+    return np.concatenate(out).astype(np.float32)
+
+
+def load_js(path, upgrade_solve_logit=None):
+    """(model, meta) from a JS checkpoint. With upgrade_solve_logit set, a v3
+    checkpoint is upgraded to v4 (see upgrade_v3) instead of refused."""
     j = json.loads(Path(path).read_text())
-    if j['obsVersion'] != OBS_VERSION or j['obsDim'] != OBS_DIM:
+    flat = np.frombuffer(base64.b64decode(j['params']), '<f4')
+    if j['obsVersion'] == 3 and j['obsDim'] == V3_OBS_DIM and upgrade_solve_logit is not None:
+        flat = upgrade_v3(flat, j['arch']['hidden'], upgrade_solve_logit)
+    elif j['obsVersion'] != OBS_VERSION or j['obsDim'] != OBS_DIM:
         raise ValueError(f"{path}: trained on obs v{j['obsVersion']} ({j['obsDim']}), env is v{OBS_VERSION} ({OBS_DIM})")
     model = Model(j['arch']['hidden'])
-    model.load_flat(np.frombuffer(base64.b64decode(j['params']), '<f4'))
+    model.load_flat(flat)
     return model, j.get('meta', {})
 
 

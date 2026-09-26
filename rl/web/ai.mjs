@@ -5,6 +5,9 @@
 // network for a shot, lines the camera up like the dev bot, and swings through
 // the same launchBall with the same meter noise.
 //
+// The observation runs the solver (rl/solver.mjs), which plays silent trial
+// shots on the live game and puts every flight global back before returning.
+//
 // Query params: ?model=<url of a checkpoint json> (default ../../models/agent.json)
 //
 // The single-file build (rl/web/build.mjs) sets window.RL_MODEL (the checkpoint
@@ -54,6 +57,16 @@ window.showMsg = (t)=>
     showMsg0(t);
 };
 
+// the solver's trial shots bounce too: keep them silent
+function quietly(f)
+{
+    const bounce = window.sfxBounce, blip = snd_bounce.play;
+    window.sfxBounce = ()=>{};
+    snd_bounce.play = ()=>{};
+    try { return f(); }
+    finally { window.sfxBounce = bounce; snd_bounce.play = blip; }
+}
+
 let curHole = null, prev, lastStart, shot = null, lastPutt = false;
 const randn = randnFrom(Math.random);
 window.botSwing = function aiSwing()
@@ -71,7 +84,9 @@ window.botSwing = function aiSwing()
         // DECIDE once per shot, then line up (same camera ease as the dev bot)
         if (lastStart)
             prev = {moved: Math.hypot(ball.x - lastStart.x, ball.z - lastStart.z), ...flags};
-        const obs = observer.observe({strokes, prev, maxOver: 5});
+        // the noise the agent trained with (rl/env.mjs DEFAULT_ENV), which the
+        // solver measures its odds against
+        const obs = quietly(()=> observer.observe({strokes, prev, maxOver: 5, impactNoise: .04, aimNoise: .015}));
         // the mode, unless the last full swing got nowhere (the escape rule)
         const stuck = lastStart && isStuck(prev, lastPutt);
         const a = model.act(obs, Math.random, randn, !stuck);
@@ -80,7 +95,9 @@ window.botSwing = function aiSwing()
         spinMode = shot.spin;
         aimYaw = shot.yaw;
         setTarget(shot.want);
-        console.log(`AI${stuck ? ' (escape)' : ''} ${CLUB_NAMES[shot.club]} ${['back', 'flat', 'top'][shot.spin+1]}`
+        const sol = observer.solution;
+        console.log(`AI${stuck ? ' (escape)' : ''}${shot.solved ? ` SOLVE (holes ${(sol.pHole*100).toFixed(0)}%)` : ''}`
+            + ` ${CLUB_NAMES[shot.club]} ${['back', 'flat', 'top'][shot.spin+1]}`
             + ` aim ${((shot.yaw - observer.pinDir())*180/Math.PI).toFixed(1)}deg off the pin,`
             + ` asks ${shot.want.toFixed(1)}yd of ${ballToPin().toFixed(1)}`);
         botLined = 1;

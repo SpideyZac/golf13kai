@@ -175,6 +175,28 @@ pub struct Ball {
     pub vz: f64,
 }
 
+/// Every global a shot writes (launchBall, shotBegin, ballUpdate, flyStep,
+/// rollStep): the solver's trial shots save and restore it (rl/solver.mjs).
+#[derive(Clone, Copy, Debug)]
+pub struct Flight {
+    ball: Ball,
+    ball_air: bool,
+    ball_rolling: bool,
+    bounces: i32,
+    pin_hit: bool,
+    pin_out: bool,
+    ball_spin: f64,
+    ball_curve: f64,
+    shot_dir: f64,
+    shot_sc: (f64, f64),
+    tree_hit: bool,
+    tree_cool: i32,
+    ball_event: u8,
+    shot_start: Pt,
+    ball_safe: Pt,
+    roll_rest: bool,
+}
+
 /// groundAt's {h, s}
 #[derive(Clone, Copy, Debug)]
 pub struct Ground {
@@ -339,6 +361,46 @@ impl Game {
             lattice: (0..LATTICE_SLOTS).map(|_| Cell::new((u64::MAX, 0.0))).collect(),
             cands: Vec::with_capacity(64),
         }
+    }
+
+    pub fn save_flight(&self) -> Flight {
+        Flight {
+            ball: self.ball,
+            ball_air: self.ball_air,
+            ball_rolling: self.ball_rolling,
+            bounces: self.bounces,
+            pin_hit: self.pin_hit,
+            pin_out: self.pin_out,
+            ball_spin: self.ball_spin,
+            ball_curve: self.ball_curve,
+            shot_dir: self.shot_dir,
+            shot_sc: self.shot_sc,
+            tree_hit: self.tree_hit,
+            tree_cool: self.tree_cool,
+            ball_event: self.ball_event,
+            shot_start: self.shot_start,
+            ball_safe: self.ball_safe,
+            roll_rest: self.roll_rest,
+        }
+    }
+
+    pub fn restore_flight(&mut self, f: &Flight) {
+        self.ball = f.ball;
+        self.ball_air = f.ball_air;
+        self.ball_rolling = f.ball_rolling;
+        self.bounces = f.bounces;
+        self.pin_hit = f.pin_hit;
+        self.pin_out = f.pin_out;
+        self.ball_spin = f.ball_spin;
+        self.ball_curve = f.ball_curve;
+        self.shot_dir = f.shot_dir;
+        self.shot_sc = f.shot_sc;
+        self.tree_hit = f.tree_hit;
+        self.tree_cool = f.tree_cool;
+        self.ball_event = f.ball_event;
+        self.shot_start = f.shot_start;
+        self.ball_safe = f.ball_safe;
+        self.roll_rest = f.roll_rest;
     }
 
     ///////////////////////////////////////////////////////////////////////////

@@ -21,13 +21,13 @@ Each run writes to `runs/<name>/`:
 
 | File | Contents |
 |---|---|
-| `log.csv` | One row per iteration: training toPar per hole (the last 2000 holes), penalties, pickups, PPO losses, entropy, KL, clip fraction, grad norm, lr, strokes/s, and the eval columns when evaluated. The same columns as the JS trainer, so `npm run plot` reads it. |
+| `log.csv` | One row per iteration: training toPar per hole (the last 2000 holes), penalties, pickups, PPO losses, entropy, KL, clip fraction, grad norm, lr, strokes/s, the eval columns when evaluated, and the solver columns (see below). The JS trainer's columns come first, so `npm run plot` reads it. |
 | `best.json` | The checkpoint with the best mean of classic and remix eval to par, in the **JS format**: the browser, `rl/eval.mjs` and `rl/web/build.mjs` load it as is |
 | `last.json` | The latest parameters, JS format |
 | `last.pt` | Everything needed to continue: `--resume runs/<name>/last.pt --iters <new total>` |
 | `config.json` | The exact arguments and device |
 
-`--init models/agent.json` starts a new run from any JS-format checkpoint (fine-tuning).
+`--init models/agent.json` starts a new run from any JS-format checkpoint (fine-tuning). A v3 checkpoint (before the solver) is upgraded on the way in, see below.
 
 ## On the GPU machine
 
@@ -54,46 +54,45 @@ Where the time goes: the envs run on the CPU, one per core (~24k strokes/s on 16
 | `--classic-prob` | 0 | Share of training episodes on the classic course. It is 0 so classic stays a held-out test. |
 | `--eval-every` / `--eval-rounds` | 10 / 4 | Deterministic 18-hole rounds on each eval set |
 | `--device` | auto | `cuda` when available, else `cpu` |
-| `--hero` | 0 | Hero-shot reward shaping scale. 0 is off. See [Hero mode](#hero-mode---hero). |
+| `--no-solver` | (on) | Turns the solver off: its observation block is zeros and `SOLVE` plays the game's club. Eval follows the same setting. |
+| `--init-solve-p` | 0.15 | With a v3 `--init`: the share of shots the upgraded agent starts out playing `SOLVE` |
 
 The original pure-Node trainer (`npm run train`, `rl/train.mjs`) still works and takes the same PPO flags, with `--workers` in place of `--envs`. It is ~18× slower.
 
-## Hero mode (`--hero`)
+## The solver
 
-By default the reward is minus the score, so the agent plays percentage golf. It lays up, finds the fat part of the green and two-putts. Hero mode is a toggle that adds bounded bonuses for attacking: holing out from far, stopping long shots next to the cup (which means reading the wind), and beating birdie. The agent already averages about a birdie a hole, so **birdie is the baseline**. Beating it pays extra, and doing worse costs a bit more than it does without shaping. The code and a full rationale are in `py/golfrl/hero.py`.
+Every observation runs a solver (`golfsim/src/solver.rs`, spec in [SPEC.md](SPEC.md#solver-rlsolvermjs-golfsimsrcsolverrs)). When the pin is in range, it plays trial shots through the real physics, with the real wind, slopes and cup, steers aim and power until one drops, and then measures how often that swing holes across the swing-meter noise. The agent sees the result (found? P(holed)? P(hazard)? yards left?) and has a 12th "club", `SOLVE`, that plays the solved swing.
+
+The reward stays **−1 per stroke**. Nothing rewards using the solver, so the agent has to learn two things from the score alone:
+
+- **When to pull the trigger.** `SOLVE` from 20 feet holes about 3 times in 4. From 150 yards the hole chance is about 1%, and the miss can finish anywhere near the pin line, so there its own shot may be better.
+- **How to set it up.** The payoff is in the positions it plays toward: a layup to a flat 60–90 yards with the wind behind, or a lag putt to below the hole. Those states carry a high solver hole chance, and the critic learns their value.
+
+Fine-tune the trained agent (recommended). `--init` upgrades a v3 checkpoint: the new inputs get zero weights, and the `SOLVE` logit starts at a bias calibrated on real states, so it is tried on about `--init-solve-p` (15%) of shots:
 
 ```sh
 cd py
-# fine-tune a trained agent into a hero (recommended: it already knows how to score)
-python -m golfrl.train --name hero1 --init ../models/agent.json --hero 1 --iters 200 --lr 1e-4
-# or from scratch
-python -m golfrl.train --name hero1 --hero 1 --iters 400 --lr 2.5e-4
-python -m golfrl.evaluate ../runs/hero1/best.json --rounds 20 --escape
+python -m golfrl.train --name solve1 --init ../models/agent.json --iters 300 --lr 1.5e-4
+python -m golfrl.evaluate ../runs/solve1/best.json --rounds 20 --escape --card --shots   # SOLVE marks the solver's shots
 ```
 
-`--hero 0`, the default, is off and gives exactly the old trainer. `--hero` is a scale, so `0.5` is gentler and `2` pushes harder. It is read on every start, `--resume` included, so a run can be switched on or off halfway through.
-
-| Flag | Default | Term (each × `--hero`) |
-|---|---|---|
-| `--hero-hole` | 0.6 | A hole-out earns `hole × ramp(from)`. The ramp goes linearly from 0 at `--hero-min` (10 yd) to 1 at `--hero-full` (150 yd), so tap-ins earn nothing and a holed 150-yard approach earns 0.6 of a stroke. |
-| `--hero-near` / `--hero-radius` | 0.15 / 4 yd | A long shot that stops on dry ground within the radius earns `near × ramp(from) × (1 − to/radius)`. Long hole-outs are rare, so this denser signal is what teaches it to attack the pin through the wind. |
-| `--hero-under` | 0.5 | Tee starts only: extra per stroke better than birdie (eagle +0.5, albatross +1.0) |
-| `--hero-over` | 0.25 | Tee starts only: extra cost per stroke worse than birdie (par −0.25, bogey −0.5, …) |
-
-Why it stays aggressive without being reckless:
-
-- **Every bonus is under a stroke.** A hero line that costs 0.3 extra strokes on average has to hole about half the time to earn back its 0.6. The agent gambles only where it can actually pull the shot off.
-- **Under > over.** A bonus of 0.5 under birdie against a penalty of 0.25 over it makes the agent mildly risk-seeking right around birdie, so it chases eagles. Because the over-birdie penalty is positive, a blow-up still hurts more than it does without shaping, so it doesn't throw holes away.
-- **The score is still the judge.** The env reward is untouched. The evals, `evalClassic`/`evalRemix` and the `best.json` selection all use the true score, and the rest of the log reports true scores too. If the agent turns into a gambler, the eval shows it, and `best.json` won't pick that checkpoint.
-- **Exploring starts** drop the ball mid-hole, so their score to par means nothing. They get the hole-out and near-miss terms (which is great approach practice) but not the birdie terms. The env reports which episodes started on the tee in the FFI info column `I_TEE`.
+Or from scratch: `python -m golfrl.train --name solve1 --iters 400 --lr 2.5e-4`.
 
 What to watch:
 
-- **`longHoleOuts`** (log column, and `longHO` in the console): the share of training holes finished by a stroke from 30+ yards. It should climb.
-- **`heroBonus`**: the mean shaping bonus per hole. It is 0 with hero off.
-- **Eval**: `long hole-outs/round` in the training printout, and `golfrl.evaluate`, which prints hole-outs from 30+ yards per round next to the eagle rate in the score distribution. The goal is more eagles and long hole-outs at about the same average to par. If eval to par gets clearly worse than your non-hero run, lower `--hero` (or raise `--hero-over`). If nothing changes, raise `--hero` or `--hero-near`.
+| Where | What |
+|---|---|
+| `solveRate` (log), `solve` (console) | Share of training strokes that were the solver's shot |
+| `solveHoled` (log), `in` (console) | Share of those that went in |
+| `longHoleOuts` (log), `longHO` (console) | Share of training holes finished from 30+ yards |
+| Eval printout | `SOLVE/round` per set, and how many dropped |
+| `golfrl.evaluate` | Solver shots and hole-outs per round, and `SOLVE` on each solver shot with `--shots` |
 
-The critic learns the shaped return, so a hero `last.pt` can resume with hero off, but its critic will take a few iterations to re-fit.
+**Speed.** An in-range observation plays 10–60 trial shots. The env runs about 4× slower (about 6k strokes/s on 16 cores, against 27k), so on the CPU an iteration takes about 3 s instead of 1.4 s. `--no-solver` restores the old speed and behaviour.
+
+**Scores.** An agent that uses the solver knows the exact physics, so do not compare its scores with the scripted bot or the v3 rows below as like for like. Report it as its own row.
+
+**The shipped model** (`models/agent.json`) is r4 upgraded to v4 with the `SOLVE` bias at −20 (`python -m golfrl.upgrade`). It never picks `SOLVE` and plays exactly as before. Replace it with a solver-trained run once there is one.
 
 ## Reading the log
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { MLP, randnFrom } from '../nn.mjs';
 import { mulberry32 } from '../sim/loader.mjs';
 import { Model, ppoRowGrad, logProb, HEAD } from '../policy.mjs';
+import { N_CLUB_ACTIONS, N_SPIN } from '../obs.mjs';
 
 function flat(n) { return [new Float32Array(n), new Float32Array(n)]; }
 
@@ -43,7 +44,7 @@ test('PPO row gradient matches finite differences of the surrogate', ()=>
     const entropy = (o)=>
     {
         let H = 0;
-        for (const [a, n] of [[0, 11], [11, 3]])
+        for (const [a, n] of [[0, N_CLUB_ACTIONS], [N_CLUB_ACTIONS, N_SPIN]])
         {
             const m = Math.max(...o.slice(a, a+n)); let s = 0;
             for (let i = 0; i < n; ++i) s += Math.exp(o[a+i]-m);
@@ -53,7 +54,7 @@ test('PPO row gradient matches finite differences of the surrogate', ()=>
         return H;
     };
     const f = (o)=> -Math.exp(logProb(o, 0, act) - oldLogp)*adv - hp.entCat*entropy(o)
-        - hp.entCont*(o[16] + o[17]);
+        - hp.entCont*(o[HEAD-2] + o[HEAD-1]);
     const d = new Float32Array(HEAD);
     ppoRowGrad(out, 0, act, oldLogp, adv, hp, 1, d);
     for (let i = 0; i < HEAD; ++i)
@@ -74,6 +75,6 @@ test('Model init produces a sane action', ()=>
     m.bind(p, g).init(mulberry32(1));
     const rand = mulberry32(2), randn = randnFrom(rand);
     const a = m.act(new Float32Array(m.obsDim).fill(.1), rand, randn);
-    assert.ok(a.club >= 0 && a.club < 11 && a.spin >= 0 && a.spin < 3);
+    assert.ok(a.club >= 0 && a.club < N_CLUB_ACTIONS && a.spin >= 0 && a.spin < 3);
     assert.ok(Number.isFinite(a.logp) && Math.abs(a.value + 4) < 3);
 });

@@ -1,4 +1,4 @@
-# GolfEnv specification (observation/action v3)
+# GolfEnv specification (observation/action v4)
 
 The environment contract between the game and the agent. `rl/env.mjs` implements the episode, and `rl/obs.mjs` implements the observation and action decoding, shared with the browser agent. `golfsim/` is the same contract in Rust, for training (see Physics).
 
@@ -9,6 +9,7 @@ Any change to what `observe()` writes, or to what `decode()` means, must bump `O
 | v1 | Pin-frame grids, previews, and the game's club |
 | v2 | Adds the last-shot and line-of-fire blocks. A deterministic v1 agent could loop against a tree it could not see at grid resolution. |
 | v3 | Actions become residual to the **game's default shot**, and the shot-specific blocks move to its aim frame. With the aim relative to the pin and capped at 60°, the agent could not aim down the fairway of a hairpin, and drove into the woods until picked up. |
+| v4 | **The solver.** Every observation runs a holing-shot solver (see Solver), whose result is a new 6-float block at the end, and the club head gains a 12th choice, `CLUB_SOLVE`, that plays its shot. v3 checkpoints upgrade losslessly (`python -m golfrl.upgrade`). |
 
 ## Episodes
 
@@ -19,7 +20,7 @@ Any change to what `observe()` writes, or to what `decode()` means, must bump `O
 | Reset spec | `{seed, remix, hole, rngSeed, start?}`: the course seed, remix or classic, hole index 0–17, the seed for the instance's `Math.random` (wind and swing noise), and an optional `start: {u, v}` in [0,1)² |
 | Exploring start | Drop the ball at fraction `u` along the centreline, `(2v−1)·60` yards across it. The offset shrinks toward the centreline until the spot is not water or OB. |
 | Termination | Holed, or `strokes >= par + maxOver` (default 5, the game's mercy rule). A penalty can push the final count to par+6, as it can in the game. |
-| Reward | −1 per stroke, and −1 more for each water or OB penalty. The undiscounted return is minus the hole score. (The optional hero shaping, `train.py --hero`, is added by the Python trainer on top of this reward. The env and this contract do not change.) |
+| Reward | −1 per stroke, and −1 more for each water or OB penalty. The undiscounted return is minus the hole score. There is no bonus for using the solver or for holing from far: the solver pays off only through strokes saved. |
 
 The rules follow `Golf13K/game/game.js`:
 
@@ -49,7 +50,7 @@ There are two implementations of this contract, and they agree bit for bit:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `club` | int 0–10 | `CLUBS` index: 1W 3W 5W 3i 5i 7i 9i 13i PW SW, and 10 is the putter |
+| `club` | int 0–11 | `CLUBS` index: 1W 3W 5W 3i 5i 7i 9i 13i PW SW, and 10 is the putter. **11 is `CLUB_SOLVE`**: the solver's shot exactly as solved (spin, aim and dist are ignored), or, when it found none, the game's club with this action's spin, aim and dist. |
 | `spin` | int 0–2 | back / none / top. Ignored for putts. |
 | `aim` | real | `yaw = ref.dir + 0.35 · clip(aim, −3, 3)` radians, so ±60° around the default aim line |
 | `dist` | real | `want = ref.dist · exp(0.35 · clip(dist, −4, 2))` yards, from 0.25× to 2× the default target |
@@ -61,9 +62,23 @@ Decoding follows the game's meter: `power = want / (carry(club) · lieMul(club))
 - `impactNoise` (default ±0.04, uniform): swing-meter timing error. It costs power and pushes, hooks or slices exactly as the game does. Errors under 0.02 snap to a perfect strike.
 - `aimNoise` (default ±0.015 rad, uniform): full swings only.
 
-These match the error the game's scripted dev bot is given, so their scores can be compared.
+These match the error the game's scripted dev bot is given, so their scores can be compared. A solver shot gets the same noise, since solving it does not make the swing perfect.
 
-## Observation (1383 floats)
+## Solver (`rl/solver.mjs`, `golfsim/src/solver.rs`)
+
+Runs at the end of every `observe()` (unless the env's `solver` option is off) and finds a swing that holes the ball from where it lies, wind, slopes, bounces, spin and cup included. It uses no model of the physics. It plays trial shots through the game's own `launchBall` and `ballUpdate`, the same loop `GolfEnv.step` runs (pin rule included), and puts every flight global back afterwards. That is why the browser agent can run it on the live game.
+
+1. **In range.** It runs only when the game's default shot aims at the pin (the pin within the game's club's reach + 20 yards, as in the reference shot). Otherwise it reports `tried = 0`.
+2. **Candidates.** The putter, when the ball is on the green, fairway or tee within `PUTT_MAX`. Then the game's club (`autoClub`) with no spin and with backspin. When the game hands over the putter off the green, the sand wedge takes the game's club's place.
+3. **Steering.** Start at the pin line with the pin distance as the target. Play a noise-free trial. If it holed, that is the solution. Otherwise turn the aim by the angle the ball finished off the pin line, and scale the target by pin distance ÷ yards travelled. Repeat, up to `SOLVE_ITERS` = 8 trials. It gives up on a candidate when a trial moves under 0.5 yards (a tree, a wall) or falls short at full power. Aiming for the ball to stop at the pin means it crosses the cup at crawling pace, which is the speed that drops.
+4. **Odds.** Each solution is replayed across the swing noise as weighted samples. Impact is perfect with probability 0.02/`impactNoise`, and otherwise ±the middle of [0.02, `impactNoise`]. For full swings, aim is the centres of the quarters of ±`aimNoise`. No aim sample is 0, because the exact solution always drops. Putts have no aim noise, so a perfect putt counts as holed. The result is P(holed), P(water or OB), and the expected yards left, with a holed ball counting 0.
+5. **Choice.** The candidate with the highest P(holed) wins, then the fewest yards left, then the earlier candidate.
+
+Typical odds (the default noise): putts 0.35–0.75, 40–100 yards about 0.2, and 100–200 yards about 0.01. A holing swing exists for about three quarters of in-range lies.
+
+**Fairness.** The solver knows the exact physics, including the cup, trees and wind, which no player can see precisely. Agents that use it are not comparable with the scripted bot or with v3 agents, which see only what a player sees. It costs time as well: an in-range observation plays 10–60 trial shots, so the Rust env runs about 4× slower (6k against 27k strokes a second on 16 cores).
+
+## Observation (1389 floats)
 
 There are two frames. In each, `+fwd` points along the frame's line and `+lat` is to its right, the side a positive `aim` moves the shot toward.
 
@@ -90,6 +105,7 @@ There are two frames. In each, `+fwd` points along the frame's line and `+lat` i
 | Centreline ahead | 20 | aim | Path points 30…300 yards further along, as (fwd, lat)/300 |
 | Grid A | 108×6 | pin | Scaled by `s = max(d, 4)`: fwd ∈ {−.1 … 1.5}·s, lat ∈ {−.4 … .4}·s |
 | Grid B | 105×6 | aim | Fixed yards: fwd 20…300 step 20, lat ∈ {−50, −30, −15, 0, 15, 30, 50} |
+| Solver | 6 | | Whether it ran (pin in range), whether it found a holing swing, and for that swing: P(holed), P(water/OB), log1p(expected yards left)/4, and whether it is a putt. The last four are 0 without a solution. |
 
 Each grid cell has 6 channels:
 

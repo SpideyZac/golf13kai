@@ -4,6 +4,7 @@
 //! - `jsmath`: JavaScript's numerics exactly as V8 computes them
 //! - `game`:   course.js + golfSim.js
 //! - `obs`:    rl/obs.mjs (observation, reference shot, action decoding)
+//! - `solver`: rl/solver.mjs (the holing-shot solver the observation runs)
 //! - `env`:    rl/env.mjs + rl/courses.mjs (episodes and rules)
 //! - `ffi`:    a batched, multi-threaded env for Python (py/golf/sim.py)
 
@@ -12,3 +13,4 @@ pub mod ffi;
 pub mod game;
 pub mod jsmath;
 pub mod obs;
+pub mod solver;
